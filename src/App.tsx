@@ -8,7 +8,7 @@ type Customer = {
   id: string | number; name: string; address: string; serviceAddress1?: string; serviceAddress2?: string; serviceCity?: string; serviceState?: string; serviceZip?: string; billingSameAsService?: boolean; billingAddress1?: string; billingAddress2?: string; billingCity?: string; billingState?: string; billingZip?: string; phone: string; email: string
   previous: number; current: number | null; lastRead: string | null; route: number; lat: number; lng: number
 }
-type UserAccount = { id: number; name: string; email: string; role: Role; active: boolean; passwordSetAt: string }
+type UserAccount = { id: string | number; name: string; email: string; role: Role; active: boolean; passwordSetAt: string }
 type ReadingCycle = { id: string | number; name: string; startDate: string; dueDate: string; months: number; status: 'open' | 'closed' }
 type RateSchedule = { id: string | number; base: number; maintenanceMonthly: number; included: number; tierOneEnd: number; tierOne: number; tierTwo: number; effectiveDate: string }
 
@@ -105,6 +105,18 @@ const money = (n: number) => n.toLocaleString('en-US', { style: 'currency', curr
 const formatNumber = (n: number) => n.toLocaleString('en-US')
 const today = new Date().toISOString().slice(0, 10)
 
+function userFromParse(user: Parse.User): UserAccount {
+  const username = user.get('username') || ''
+  return {
+    id: user.id || '',
+    name: user.get('name') || username,
+    email: user.get('email') || username,
+    role: user.get('role') === 'meter-reader' ? 'meter-reader' : 'administrator',
+    active: user.get('active') !== false,
+    passwordSetAt: user.get('passwordSetAt') || user.createdAt?.toISOString().slice(0, 10) || today,
+  }
+}
+
 function Icon({ name }: { name: string }) {
   const paths: Record<string, string> = {
     grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
@@ -168,13 +180,15 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
       new Parse.Query('Customer').ascending('route').limit(1000).find(),
       new Parse.Query('ReadingCycle').descending('startDate').limit(100).find(),
       new Parse.Query('RateSchedule').descending('effectiveDate').first(),
+      authUser.get('role') === 'administrator' ? new Parse.Query(Parse.User).ascending('username').limit(1000).find() : Promise.resolve([]),
     ])
-      .then(([customerObjects, cycleObjects, rateObject]) => {
+      .then(([customerObjects, cycleObjects, rateObject, userObjects]) => {
         setCustomers(customerObjects.map(customerFromParse))
         const loadedCycles = cycleObjects.map(cycleFromParse)
         setCycles(loadedCycles)
         setActiveCycleId(loadedCycles.find(cycle => cycle.status === 'open')?.id || loadedCycles[0]?.id || '')
         if (rateObject) setRate(rateFromParse(rateObject))
+        setUsers(userObjects.map(userFromParse))
       })
       .catch(error => setAuthError(error instanceof Error ? error.message : 'Could not load customer data.'))
       .finally(() => setDataLoading(false))
@@ -279,6 +293,8 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
         parseUser.setPassword(password)
         parseUser.set('name', user.name)
         parseUser.set('role', user.role)
+        parseUser.set('active', true)
+        parseUser.set('passwordSetAt', today)
         await parseUser.signUp()
         await Parse.User.logOut()
         setAuthUser(await Parse.User.become(adminSessionToken))
@@ -286,10 +302,22 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
       } catch (error) { setToast(error instanceof Error ? error.message : 'Could not create user') }
       return
     }
-    setUsers(items => [...items, { ...user, id: Math.max(0, ...items.map(item => item.id)) + 1, active: true, passwordSetAt: today }])
+    setUsers(items => [...items, { ...user, id: Math.max(0, ...items.map(item => typeof item.id === 'number' ? item.id : 0)) + 1, active: true, passwordSetAt: today }])
     setToast('User created in demo mode')
   }
-  const toggleUser = (id: number) => setUsers(items => items.map(user => user.id === id ? { ...user, active: !user.active } : user))
+  const toggleUser = async (id: string | number) => {
+    if (parseReady) {
+      try {
+        const user = await new Parse.Query(Parse.User).get(String(id))
+        user.set('active', user.get('active') === false)
+        const saved = await user.save()
+        setUsers(items => items.map(item => item.id === id ? userFromParse(saved) : item))
+        setToast(`User ${saved.get('active') === false ? 'disabled' : 'enabled'}`)
+      } catch (error) { setToast(error instanceof Error ? error.message : 'Could not update user') }
+      return
+    }
+    setUsers(items => items.map(user => user.id === id ? { ...user, active: !user.active } : user))
+  }
 
   const logIn = async (username: string, password: string) => {
     setAuthLoading(true); setAuthError('')
@@ -354,7 +382,7 @@ function Customers({ customers, onEdit, onAdd }: { customers: Customer[]; onEdit
 function billFor(c: Customer, rate: RateSchedule, months = 4) { const usage = c.current === null ? 0 : Math.max(0, c.current - c.previous); const tierOneUnits = Math.max(0, Math.min(usage, rate.tierOneEnd) - rate.included); const tierTwoUnits = Math.max(0, usage - rate.tierOneEnd); const tierOneAmount = Math.ceil(tierOneUnits / 100) * rate.tierOne; const tierTwoAmount = Math.ceil(tierTwoUnits / 100) * rate.tierTwo; const maintenance = rate.maintenanceMonthly * months; return { usage, tierOneUnits, tierTwoUnits, tierOneAmount, tierTwoAmount, maintenance, total: rate.base + maintenance + tierOneAmount + tierTwoAmount } }
 function Billing({ customers, activeCycle, rate, canManage, onSaveRate, onUpdateCycle }: { customers: Customer[]; activeCycle: ReadingCycle | null; rate: RateSchedule; canManage: boolean; onSaveRate: (rate: RateSchedule) => Promise<void>; onUpdateCycle: (cycle: ReadingCycle) => Promise<void> }) { const period = activeCycle ? `${activeCycle.startDate} – ${activeCycle.dueDate}` : 'No active checkpoint'; const months = activeCycle?.months || 4; const rows = customers.filter(c => c.current !== null); const total = rows.reduce((sum, c) => sum + billFor(c, rate, months).total, 0); const [settingsOpen, setSettingsOpen] = useState(false); const exportCsv = () => { const header = 'Customer,Service address,Billing address,Invoice period,Item,Description,Quantity,Rate,Amount'; const body = rows.flatMap(c => { const b = billFor(c, rate, months); const service = formattedAddress(c); const billing = formattedAddress(c, true); return [[c.name, service, billing, period, 'WATER-BASE', `Base charge (includes first ${formatNumber(rate.included)} ft³)`, 1, rate.base, rate.base], [c.name, service, billing, period, 'MAINTENANCE', `Maintenance surcharge (${months} months)`, months, rate.maintenanceMonthly, b.maintenance], ...(b.tierOneUnits ? [[c.name, service, billing, period, 'WATER-TIER-1', `Usage ${rate.included + 1}–${rate.tierOneEnd} ft³`, Math.ceil(b.tierOneUnits / 100), rate.tierOne, b.tierOneAmount]] : []), ...(b.tierTwoUnits ? [[c.name, service, billing, period, 'WATER-TIER-2', `Usage ${rate.tierOneEnd + 1}+ ft³`, Math.ceil(b.tierTwoUnits / 100), rate.tierTwo, b.tierTwoAmount]] : [])] }).map(r => r.map(v => `"${String(v).replaceAll('"', '""')}"`).join(',')); const blob = new Blob([[header, ...body].join('\n')], { type: 'text/csv' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'derbyshire-water-quickbooks-export.csv'; a.click(); URL.revokeObjectURL(url) }; return <><PageTitle eyebrow="ADMINISTRATION" title="Billing export" description="Review line items, then download a QuickBooks-ready CSV." action={<button className="primary" onClick={exportCsv}><Icon name="download" /> Download CSV</button>} /><div className="billing-controls"><label>Billing period<input value={period} readOnly /></label><div className="billing-summary"><span>{rows.length} invoices ready</span><strong>{money(total)}</strong><small>estimated total</small></div></div><div className="rate-banner"><div className="rate-badge">$</div><div><strong>Current rate schedule</strong><span>Base {money(rate.base)} / cycle · Maintenance {money(rate.maintenanceMonthly)} / month · Usage billed per 100 ft³</span></div>{canManage && <button onClick={() => setSettingsOpen(true)}>Manage rates & period <Icon name="arrow" /></button>}</div><div className="panel billing-table"><div className="table-head"><span>Customer</span><span>Usage</span><span>Line-item breakdown</span><span>Total</span></div>{rows.map(c => { const b = billFor(c, rate, months); return <div className="billing-row" key={c.id}><div><strong>{c.name}</strong><span>{formattedAddress(c, true)}</span></div><div><strong>{formatNumber(b.usage)} ft³</strong><span>Current {formatNumber(c.current!)}</span></div><div className="line-items"><span>Base <b>{money(rate.base)}</b></span><span>Maintenance ({months} mo) <b>{money(b.maintenance)}</b></span>{b.tierOneAmount > 0 && <span>Tier 1 · {formatNumber(b.tierOneUnits)} ft³ <b>{money(b.tierOneAmount)}</b></span>}{b.tierTwoAmount > 0 && <span>Tier 2 · {formatNumber(b.tierTwoUnits)} ft³ <b>{money(b.tierTwoAmount)}</b></span>}</div><strong className="bill-total">{money(b.total)}</strong></div>})}</div><p className="billing-note">Usage is calculated as current register minus previous register. Each usage tier rounds up to the next 100 ft³ increment. Billing period and rates are editable by administrators.</p>{settingsOpen && <BillingSettingsModal rate={rate} cycle={activeCycle} onClose={() => setSettingsOpen(false)} onSaveRate={onSaveRate} onUpdateCycle={onUpdateCycle} />}</> }
 
-function Users({ users, onAdd, onToggle }: { users: UserAccount[]; onAdd: (user: Omit<UserAccount, 'id' | 'active' | 'passwordSetAt'>, password: string) => void; onToggle: (id: number) => void }) {
+function Users({ users, onAdd, onToggle }: { users: UserAccount[]; onAdd: (user: Omit<UserAccount, 'id' | 'active' | 'passwordSetAt'>, password: string) => void; onToggle: (id: string | number) => void }) {
   const [formOpen, setFormOpen] = useState(false)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
