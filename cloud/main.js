@@ -30,11 +30,16 @@ function userPayload(user) {
 
 Parse.Cloud.define('adminListUsers', async request => {
   administrator(request)
-  const query = new Parse.Query(Parse.User)
-  query.ascending('username')
-  query.limit(1000)
-  const users = await query.find({ useMasterKey: true })
-  return users.map(userPayload)
+  try {
+    const query = new Parse.Query('_User')
+    query.ascending('username')
+    query.limit(1000)
+    const users = await query.find({ useMasterKey: true })
+    return users.map(userPayload)
+  } catch (error) {
+    request.log.error(`adminListUsers failed: ${error instanceof Error ? error.message : String(error)}`)
+    throw new Parse.Error(Parse.Error.SCRIPT_FAILED, 'Could not load users from the server.')
+  }
 })
 
 Parse.Cloud.define('adminCreateUser', async request => {
@@ -66,7 +71,7 @@ Parse.Cloud.define('adminSetUserActive', async request => {
   if (!userId) throw new Parse.Error(Parse.Error.INVALID_QUERY, 'A user id is required.')
   if (userId === admin.id) throw new Parse.Error(Parse.Error.OPERATION_FORBIDDEN, 'You cannot disable your own account.')
 
-  const user = await new Parse.Query(Parse.User).get(userId, { useMasterKey: true })
+  const user = await new Parse.Query('_User').get(userId, { useMasterKey: true })
   user.set('active', request.params.active !== false)
   await user.save(null, { useMasterKey: true })
   return userPayload(user)
