@@ -17,3 +17,52 @@
 @media(max-width:700px){.mobile-menu{display:flex}}
 .full-map-backdrop{z-index:1000}
 .full-map-head>div{flex:1;min-width:0}.full-map-menu{flex:none;margin-right:10px}.full-map-close{flex:none}
+
+/* Readability and route interaction improvements */
+body{font-size:15px}
+.brand strong{font-size:17px}.brand span{font-size:12px}.workspace-label{font-size:11px}.nav-item{font-size:14px}.nav-item em{font-size:11px}.secure strong{font-size:12px}.secure span{font-size:11px}.user-card strong{font-size:12px}.user-card span{font-size:11px}.crumb{font-size:13px}.role-pill{font-size:12px}.eyebrow{font-size:11px}.page-title h1{font-size:38px}.page-title p{font-size:14px}.primary,.secondary{font-size:13px}.stat-label{font-size:12px}.stat-value{font-size:24px}.stat-detail{font-size:11px}.panel h2{font-size:17px}.panel-head p{font-size:12px}.text-button{font-size:12px}.progress-copy strong{font-size:15px}.progress-copy p{font-size:12px}.mini-legend{font-size:11px}.map-label{font-size:11px}.recent-info strong{font-size:12px}.recent-info span,.reading-value span{font-size:11px}.reading-value strong{font-size:13px}.callout strong{font-size:13px}.callout span{font-size:11px}.callout-link{font-size:12px}.cycle-select{font-size:12px}.search input{font-size:12px}.filter-tabs button{font-size:11px}.address-block strong{font-size:13px}.address-block span{font-size:11px}.previous span,.reading-input>span{font-size:10px}.previous strong{font-size:13px}.input-wrap input{font-size:13px}.input-wrap span{font-size:10px}.warning-text{font-size:10px}.save-button,.saved{font-size:11px}.route-address strong{font-size:12px}.route-address span{font-size:10px}.status-done,.status-todo{font-size:10px}.filter-button{font-size:11px}.table-head{font-size:10px}.customer-name strong{font-size:12px}.customer-name span,.contact span,.last-read span{font-size:10px}.last-read strong{font-size:11px}.account-status,.edit-button{font-size:10px}.billing-controls label{font-size:11px}.billing-summary span,.billing-summary small{font-size:11px}.rate-banner strong{font-size:12px}.rate-banner span{font-size:11px}.billing-row>div>strong{font-size:12px}.billing-row>div>span,.line-items span{font-size:10px}.bill-total{font-size:14px}.billing-note{font-size:11px}.modal-head h2,.confirm-modal h2{font-size:27px}.form-grid label,.address-grid label{font-size:11px}.form-grid input,.address-grid input{font-size:12px}.modal-intro{font-size:12px}.same-address{font-size:11px}.billing-preview{font-size:9px}.danger-button{font-size:11px}.danger-solid{font-size:13px}.full-map-head h2{font-size:28px}.full-map-head p{font-size:11px}.full-map-item strong{font-size:11px}.full-map-item div span{font-size:10px}.leaflet-popup-content{font-size:11px}.leaflet-popup-content strong{font-size:12px}.map-empty-overlay strong{font-size:14px}.map-empty-overlay span{font-size:11px}.locate-button{font-size:10px}.location-message{font-size:10px}.settings-section h3{font-size:13px}.settings-empty{font-size:11px}.auth-card h1{font-size:33px}.auth-subtitle{font-size:13px}.auth-card form label{font-size:11px}.auth-card form input{font-size:13px}.auth-footer{font-size:11px}.data-loading{font-size:11px}
+.route-item{cursor:grab;transition:background .15s ease,border-color .15s ease,box-shadow .15s ease}.route-item:active{cursor:grabbing}.route-item.dragging{opacity:.45}.route-item.drag-over{background:#f0faf8;border-color:#54aaa1;box-shadow:0 0 0 2px #d9f0ec}.drag-handle{display:grid;place-items:center;color:#96aaab;cursor:grab;padding:3px}.drag-handle .icon{width:16px;height:16px}
+@media(max-width:700px){.mobile-nav-backdrop{z-index:1001}.sidebar.mobile-open{z-index:1002}.full-map-menu{display:flex}.full-map-head{position:relative;z-index:1}}
+@media(max-width:700px){.page-title h1{font-size:32px}.stat-value{font-size:20px}.panel h2{font-size:16px}.full-map-head h2{font-size:25px}.modal-head h2,.confirm-modal h2{font-size:25px}.auth-card h1{font-size:31px}}
+.customer-export-button{display:flex;align-items:center;gap:8px}.customer-export-button .icon{width:15px}@media(max-width:700px){.customer-export-button{width:100%;justify-content:center}}
+.secondary{background:#e3efee;color:#1e555b;border:1px solid #8fb5b3;box-shadow:0 2px 5px rgba(18,55,62,.08)}.secondary:hover{background:#d5e8e6;border-color:#5f9996;color:#16474e}.customer-export-button{background:#2f7f7c;color:#fff;border-color:#236b68;box-shadow:0 3px 8px rgba(29,108,104,.22)}.customer-export-button:hover{background:#246d6a;color:#fff;border-color:#1d5d5a}
+.customer-name strong{font-size:18px}.customer-name span{font-size:14px}
+.district-marker span{font-size:11px}
+.map-pin{font-size:10px}
+.map-layer-toggle{position:absolute;z-index:1000;top:12px;left:12px;display:flex;gap:2px;padding:3px;background:#fff;border:1px solid #9db6b6;border-radius:6px;box-shadow:0 2px 7px rgba(18,55,62,.22)}
+.map-layer-toggle button{background:#fff;color:#214b53;padding:7px 10px;border-radius:4px;font-size:12px;font-weight:700}
+.map-layer-toggle button:hover{background:#e7f2f1}
+.map-layer-toggle button.selected{background:#2f7f7c;color:#fff}
+
+/* High-contrast meter reading controls */
+:root{--muted:#526a70;--line:#d7e3e3}
+.readings-page .page-title p,.readings-page .panel-head p{color:#536b71}
+.readings-page .search{height:44px;border-color:#c8d9d9;color:#456269}
+.readings-page .search input{font-size:14px;color:#203f47}
+.readings-page .search input::placeholder{color:#5b7075;opacity:1}
+.readings-page .callout{border-color:#c6e3df;background:#e8f6f3}
+.readings-page .callout strong{font-size:14px;color:#1f4d55}
+.readings-page .callout span{font-size:12px;color:#4f6c71}
+.readings-page .reading-list{gap:10px}
+.readings-page .reading-row{min-height:92px;padding:17px 20px;border-color:#d4e1e1;box-shadow:0 2px 8px rgba(18,55,62,.04)}
+.readings-page .route-number{width:27px;height:27px;background:#e3f2ef;color:#26736f;font-size:12px}
+.readings-page .address-block{width:230px}
+.readings-page .address-block strong{font-size:15px;line-height:1.3;color:#173d46}
+.readings-page .address-block span{font-size:12px;color:#4d686e;margin-top:6px}
+.readings-page .previous{width:125px}
+.readings-page .previous span,.readings-page .reading-input>span{font-size:11px;font-weight:600;color:#5b7378;margin-bottom:7px}
+.readings-page .previous strong{font-size:17px;color:#1d4650}
+.readings-page .reading-input{width:175px}
+.readings-page .input-wrap{height:42px;border-color:#bdd0d1;background:#fff}
+.readings-page .input-wrap input{font-size:14px;color:#183f48;padding:0 10px}
+.readings-page .input-wrap input::placeholder{color:#60767b;opacity:1}
+.readings-page .input-wrap span{font-size:11px;color:#60777b;padding-right:10px}
+.readings-page .warning-text{font-size:11px;color:#a86417}
+.readings-page .save-button{font-size:12px;padding:11px 13px}
+.readings-page .saved{font-size:12px;color:#287d75}
+@media(max-width:1050px){.readings-page .address-block{width:190px}.readings-page .previous{width:105px}.readings-page .reading-input{width:160px}}
+@media(max-width:700px){.readings-page .reading-row{min-height:0;padding:15px}.readings-page .address-block{width:auto}.readings-page .previous,.readings-page .reading-input{width:auto}.readings-page .address-block strong{font-size:15px}.readings-page .address-block span{font-size:12px}.readings-page .previous strong{font-size:16px}.readings-page .input-wrap{height:44px}}
+
+/* Higher-contrast text palette */
+:root{--ink:#173a43;--muted:#52666c;--line:#cbdadb}
+body{color:var(--ink)}.crumb,.page-title p,.panel-head p{color:#52666c}.search{color:#526b70;border-color:#cbdadb}.search input{color:#1d3c45}.search input::placeholder{color:#5a7075;opacity:1}.table-head{color:#526a70}.customer-name strong{color:#173d46}.customer-name span,.contact span,.last-read span{color:#5d7479}.customer-name .billing-preview{color:#647b80}.contact span:first-child{color:#3f5f66}.last-read strong{color:#365860}.muted{color:#5f7479!important}.account-status{background:#dcefe9;color:#216b66}.edit-button{color:#176b68}.toolbar .search .icon{color:#536a70}.role-pill{color:#284f58}.help{color:#4d686e;border-color:#9fb5b7}.status-done{color:#216b66;background:#dcefe9}.status-todo{color:#8a5b16;background:#ffedc8}.access-banner span,.access-banner strong,.rate-banner span,.rate-banner strong{color:#41636a}.billing-note,.settings-empty,.location-message{color:#5d7479}.full-map-head p,.full-map-item div span,.full-map-item strong{color:#4b666c}.route-address span,.route-address strong{color:#46636a}.nav-item{color:#b8d0d1}.workspace-label{color:#86a9ad}.secure span,.user-card span{color:#9ac0c2}
