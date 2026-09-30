@@ -174,13 +174,14 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
   }, [parseReady])
   useEffect(() => {
     if (!parseReady || !authUser) return
-    setRole(authUser.get('role') === 'meter-reader' ? 'meter-reader' : 'administrator')
+    const isMeterReader = authUser.get('role') === 'meter-reader'
+    setRole(isMeterReader ? 'meter-reader' : 'administrator')
     setDataLoading(true)
     Promise.all([
       new Parse.Query('Customer').ascending('route').limit(1000).find(),
       new Parse.Query('ReadingCycle').descending('startDate').limit(100).find(),
       new Parse.Query('RateSchedule').descending('effectiveDate').first(),
-      authUser.get('role') === 'administrator' ? new Parse.Query(Parse.User).ascending('username').limit(1000).find() : Promise.resolve([]),
+      !isMeterReader ? new Parse.Query(Parse.User).ascending('username').limit(1000).find() : Promise.resolve([]),
     ])
       .then(([customerObjects, cycleObjects, rateObject, userObjects]) => {
         setCustomers(customerObjects.map(customerFromParse))
