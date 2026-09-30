@@ -298,7 +298,10 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
         parseUser.set('passwordSetAt', today)
         await parseUser.signUp()
         await Parse.User.logOut()
-        setAuthUser(await Parse.User.become(adminSessionToken))
+        const restoredAdmin = await Parse.User.become(adminSessionToken)
+        setAuthUser(restoredAdmin)
+        const refreshedUsers = await new Parse.Query(Parse.User).ascending('username').limit(1000).find()
+        setUsers(refreshedUsers.map(userFromParse))
         setToast('User created in Back4App')
       } catch (error) { setToast(error instanceof Error ? error.message : 'Could not create user') }
       return
