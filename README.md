@@ -27,6 +27,12 @@ The live rate page linked in the project brief currently displays an older July 
 
 The app now uses these Parse classes as needed: `Customer`, `ReadingCycle`, and `MeterReading`. Create a new checkpoint from **Read meters → New checkpoint**. A checkpoint rolls forward each customer's previous reading, clears the new cycle's current reading, and stores each submitted reading in `MeterReading`.
 
+### Parse Cloud Code setup
+
+User administration is implemented in `cloud/main.js` with three server-side functions: `adminListUsers`, `adminCreateUser`, and `adminSetUserActive`. Deploy that file in the Back4App dashboard under **Cloud Code** before using **Users & access**.
+
+Before deploying, set the existing administrator's `_User.role` field to `administrator` in the Back4App data browser. Then set the `_User` class permissions to deny Public Read/Write/Add field and deny Authenticated Read/Write/Add field. The Cloud Functions use the Parse Master Key server-side to read and update users without exposing passwords or ACLs to the browser. Never place the Master Key in `.env.local`, GitHub Actions, or frontend code.
+
 The route plan uses Leaflet with OpenStreetMap tiles. Customer addresses are geocoded only when an administrator clicks **Locate address** in the customer form; the returned latitude/longitude are saved on the `Customer` record and reused by the map.
 
 Each customer has separate structured service and billing addresses: Address 1, Address 2, City, State, and ZIP. Geocoding uses the service address; the billing address is included separately in the QuickBooks export.

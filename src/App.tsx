@@ -105,18 +105,6 @@ const money = (n: number) => n.toLocaleString('en-US', { style: 'currency', curr
 const formatNumber = (n: number) => n.toLocaleString('en-US')
 const today = new Date().toISOString().slice(0, 10)
 
-function userFromParse(user: Parse.User): UserAccount {
-  const username = user.get('username') || ''
-  return {
-    id: user.id || '',
-    name: user.get('name') || username,
-    email: user.get('email') || username,
-    role: user.get('role') === 'meter-reader' ? 'meter-reader' : 'administrator',
-    active: user.get('active') !== false,
-    passwordSetAt: user.get('passwordSetAt') || user.createdAt?.toISOString().slice(0, 10) || today,
-  }
-}
-
 function Icon({ name }: { name: string }) {
   const paths: Record<string, string> = {
     grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
@@ -181,7 +169,7 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
       new Parse.Query('Customer').ascending('route').limit(1000).find(),
       new Parse.Query('ReadingCycle').descending('startDate').limit(100).find(),
       new Parse.Query('RateSchedule').descending('effectiveDate').first(),
-      !isMeterReader ? new Parse.Query(Parse.User).ascending('username').limit(1000).find() : Promise.resolve([]),
+      !isMeterReader ? Parse.Cloud.run('adminListUsers') as Promise<UserAccount[]> : Promise.resolve([]),
     ])
       .then(([customerObjects, cycleObjects, rateObject, userObjects]) => {
         setCustomers(customerObjects.map(customerFromParse))
@@ -189,7 +177,7 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
         setCycles(loadedCycles)
         setActiveCycleId(loadedCycles.find(cycle => cycle.status === 'open')?.id || loadedCycles[0]?.id || '')
         if (rateObject) setRate(rateFromParse(rateObject))
-        setUsers(userObjects.map(userFromParse))
+        setUsers(userObjects)
       })
       .catch(error => setAuthError(error instanceof Error ? error.message : 'Could not load customer data.'))
       .finally(() => setDataLoading(false))
@@ -286,22 +274,8 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
   const addUser = async (user: Omit<UserAccount, 'id' | 'active' | 'passwordSetAt'>, password: string) => {
     if (parseReady && authUser) {
       try {
-        const adminSessionToken = authUser.getSessionToken()
-        if (!adminSessionToken) throw new Error('Your session has expired. Please sign in again.')
-        const parseUser = new Parse.User()
-        parseUser.setUsername(user.email)
-        parseUser.setEmail(user.email)
-        parseUser.setPassword(password)
-        parseUser.set('name', user.name)
-        parseUser.set('role', user.role)
-        parseUser.set('active', true)
-        parseUser.set('passwordSetAt', today)
-        await parseUser.signUp()
-        await Parse.User.logOut()
-        const restoredAdmin = await Parse.User.become(adminSessionToken)
-        setAuthUser(restoredAdmin)
-        const refreshedUsers = await new Parse.Query(Parse.User).ascending('username').limit(1000).find()
-        setUsers(refreshedUsers.map(userFromParse))
+        const created = await Parse.Cloud.run('adminCreateUser', { ...user, password }) as UserAccount
+        setUsers(items => [...items.filter(item => item.id !== created.id), created].sort((a, b) => a.email.localeCompare(b.email)))
         setToast('User created in Back4App')
       } catch (error) { setToast(error instanceof Error ? error.message : 'Could not create user') }
       return
@@ -312,11 +286,11 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
   const toggleUser = async (id: string | number) => {
     if (parseReady) {
       try {
-        const user = await new Parse.Query(Parse.User).get(String(id))
-        user.set('active', user.get('active') === false)
-        const saved = await user.save()
-        setUsers(items => items.map(item => item.id === id ? userFromParse(saved) : item))
-        setToast(`User ${saved.get('active') === false ? 'disabled' : 'enabled'}`)
+        const current = users.find(item => item.id === id)
+        if (!current) return
+        const saved = await Parse.Cloud.run('adminSetUserActive', { userId: String(id), active: !current.active }) as UserAccount
+        setUsers(items => items.map(item => item.id === id ? saved : item))
+        setToast(`User ${saved.active ? 'enabled' : 'disabled'}`)
       } catch (error) { setToast(error instanceof Error ? error.message : 'Could not update user') }
       return
     }
@@ -399,7 +373,7 @@ function Users({ users, onAdd, onToggle }: { users: UserAccount[]; onAdd: (user:
     setName(''); setEmail(''); setPassword(''); setNewRole('meter-reader'); setFormOpen(false)
   }
   return <><PageTitle eyebrow="ADMINISTRATION" title="Users & access" description="Invite meter readers and manage administrator access." action={<button className="primary" onClick={() => setFormOpen(true)}><Icon name="plus" /> Add user</button>} />
-    <div className="access-banner"><div className="access-banner-icon"><Icon name="lock" /></div><div><strong>Authentication is managed by Parse</strong><span>Passwords are never saved in this browser. In production, the form below will create a Parse User with a secure password hash.</span></div></div>
+    <div className="access-banner"><div className="access-banner-icon"><Icon name="lock" /></div><div><strong>Authentication is managed by Parse Cloud Code</strong><span>Passwords are sent directly to a server-side Cloud Function and are never returned to this browser.</span></div></div>
     <div className="panel users-table"><div className="table-head user-table-head"><span>User</span><span>Role</span><span>Password</span><span>Status</span><span /></div>{users.map(user => <div className="user-row" key={user.id}><div className="customer-name"><div className="avatar small">{user.name.split(' ').map(n => n[0]).slice(0, 2).join('')}</div><div><strong>{user.name}</strong><span>{user.email}</span></div></div><span className={`role-tag ${user.role}`}>{user.role === 'administrator' ? 'Administrator' : 'Meter reader'}</span><span className="password-state">Set {user.passwordSetAt}<button>Reset</button></span><button className={user.active ? 'active-state' : 'inactive-state'} onClick={() => onToggle(user.id)}>{user.active ? 'Active' : 'Disabled'}</button><button className="edit-button">⋯</button></div>)}</div>
     {formOpen && <div className="modal-backdrop"><form className="modal" onSubmit={submit}><div className="modal-head"><div><div className="eyebrow">ACCESS MANAGEMENT</div><h2>Add a user</h2></div><button type="button" onClick={() => setFormOpen(false)}><Icon name="close" /></button></div><p className="modal-intro">Create a login for a meter reader or another administrator. Use at least 8 characters for the initial password.</p><div className="form-grid"><label>Full name<input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Taylor Morgan" required /></label><label>Email address<input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="taylor@example.com" required /></label><label>Role<select value={newRole} onChange={e => setNewRole(e.target.value as Role)}><option value="meter-reader">Meter reader</option><option value="administrator">Administrator</option></select></label><label>Initial password<input type="password" minLength={8} value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" required /></label></div><div className="modal-foot"><button type="button" className="secondary" onClick={() => setFormOpen(false)}>Cancel</button><button type="submit" className="primary" disabled={password.length < 8 || !name || !email}>Create user</button></div></form></div>}
   </>
