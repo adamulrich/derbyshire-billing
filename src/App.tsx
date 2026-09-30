@@ -6,7 +6,7 @@ type View = 'dashboard' | 'readings' | 'route' | 'customers' | 'billing' | 'user
 type Role = 'meter-reader' | 'administrator'
 type Customer = {
   id: string | number; name: string; address: string; serviceAddress1?: string; serviceAddress2?: string; serviceCity?: string; serviceState?: string; serviceZip?: string; billingSameAsService?: boolean; billingAddress1?: string; billingAddress2?: string; billingCity?: string; billingState?: string; billingZip?: string; phone: string; email: string
-  previous: number; current: number | null; lastRead: string | null; route: number; lat: number; lng: number
+  previous: number; current: number | null; lastRead: string | null; route: number; lat: number; lng: number; accountNumber?: string; partTimeFullTime?: string; meterInstalled?: string; residents?: string; ownerTenant?: string; notes?: string; business?: string; parcelId?: string; connectionStatus?: string; phone2?: string; email2?: string; paperlessBilling?: string; geocodeSource?: string; geocodeDisplayName?: string; geocodedAt?: string
 }
 type UserAccount = { id: string | number; name: string; email: string; role: Role; active: boolean; passwordSetAt: string }
 type ReadingCycle = { id: string | number; name: string; startDate: string; dueDate: string; months: number; status: 'open' | 'closed' }
@@ -59,6 +59,21 @@ function customerFromParse(object: Parse.Object): Customer {
     route: Number(object.get('route') || 0),
     lat: Number(object.get('lat') || 39.25),
     lng: Number(object.get('lng') || -121.02),
+    accountNumber: object.get('accountNumber') || '',
+    partTimeFullTime: object.get('partTimeFullTime') || '',
+    meterInstalled: object.get('meterInstalled') || '',
+    residents: object.get('residents') || '',
+    ownerTenant: object.get('ownerTenant') || '',
+    notes: object.get('notes') || '',
+    business: object.get('business') || '',
+    parcelId: object.get('parcelId') || '',
+    connectionStatus: object.get('connectionStatus') || '',
+    phone2: object.get('phone2') || '',
+    email2: object.get('email2') || '',
+    paperlessBilling: object.get('paperlessBilling') || '',
+    geocodeSource: object.get('geocodeSource') || '',
+    geocodeDisplayName: object.get('geocodeDisplayName') || '',
+    geocodedAt: object.get('geocodedAt') || '',
   }
 }
 
@@ -98,6 +113,21 @@ async function saveCustomerToParse(customer: Customer): Promise<Customer> {
   object.set('route', customer.route)
   object.set('lat', customer.lat)
   object.set('lng', customer.lng)
+  object.set('accountNumber', customer.accountNumber || '')
+  object.set('partTimeFullTime', customer.partTimeFullTime || '')
+  object.set('meterInstalled', customer.meterInstalled || '')
+  object.set('residents', customer.residents || '')
+  object.set('ownerTenant', customer.ownerTenant || '')
+  object.set('notes', customer.notes || '')
+  object.set('business', customer.business || '')
+  object.set('parcelId', customer.parcelId || '')
+  object.set('connectionStatus', customer.connectionStatus || '')
+  object.set('phone2', customer.phone2 || '')
+  object.set('email2', customer.email2 || '')
+  object.set('paperlessBilling', customer.paperlessBilling || '')
+  object.set('geocodeSource', customer.geocodeSource || '')
+  object.set('geocodeDisplayName', customer.geocodeDisplayName || '')
+  object.set('geocodedAt', customer.geocodedAt || '')
   return customerFromParse(await object.save())
 }
 
