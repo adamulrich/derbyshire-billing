@@ -33,6 +33,9 @@ body{font-size:15px}
 .map-layer-toggle button{background:#fff;color:#214b53;padding:7px 10px;border-radius:4px;font-size:12px;font-weight:700}
 .map-layer-toggle button:hover{background:#e7f2f1}
 .map-layer-toggle button.selected{background:#2f7f7c;color:#fff}
+.board-member-toggle{flex-wrap:wrap}
+.board-member-toggle span{color:#60777b;font-size:11px;margin-left:4px}
+.board-member-label{color:#8a641d!important;font-size:10px!important;margin-top:4px!important;font-weight:700}
 
 /* High-contrast meter reading controls */
 :root{--muted:#526a70;--line:#d7e3e3}
