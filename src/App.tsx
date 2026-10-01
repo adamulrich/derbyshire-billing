@@ -136,6 +136,7 @@ async function saveCustomerToParse(customer: Customer): Promise<Customer> {
 }
 
 const money = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+const roundToCents = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
 const formatNumber = (n: number) => n.toLocaleString('en-US')
 const today = new Date().toISOString().slice(0, 10)
 
@@ -558,7 +559,7 @@ function Customers({ customers, onEdit, onAdd }: { customers: Customer[]; onEdit
   </>
 }
 
-function billFor(c: Customer, rate: RateSchedule, months = 4) { const usage = c.current === null ? 0 : Math.max(0, c.current - c.previous); const tierOneUnits = Math.max(0, Math.min(usage, rate.tierOneEnd) - rate.included); const tierTwoUnits = Math.max(0, usage - rate.tierOneEnd); const tierOneAmount = Math.ceil(tierOneUnits / 100) * rate.tierOne; const tierTwoAmount = Math.ceil(tierTwoUnits / 100) * rate.tierTwo; const maintenance = rate.maintenanceMonthly * months; const boardMemberDiscount = c.boardMember === true ? rate.boardMemberDiscount : 0; return { usage, tierOneUnits, tierTwoUnits, tierOneAmount, tierTwoAmount, maintenance, boardMemberDiscount, total: rate.base + maintenance + tierOneAmount + tierTwoAmount - boardMemberDiscount } }
+function billFor(c: Customer, rate: RateSchedule, months = 4) { const usage = c.current === null ? 0 : Math.max(0, c.current - c.previous); const tierOneUnits = Math.max(0, Math.min(usage, rate.tierOneEnd) - rate.included); const tierTwoUnits = Math.max(0, usage - rate.tierOneEnd); const tierOneAmount = roundToCents(tierOneUnits / 100 * rate.tierOne); const tierTwoAmount = roundToCents(tierTwoUnits / 100 * rate.tierTwo); const maintenance = roundToCents(rate.maintenanceMonthly * months); const boardMemberDiscount = c.boardMember === true ? rate.boardMemberDiscount : 0; return { usage, tierOneUnits, tierTwoUnits, tierOneAmount, tierTwoAmount, maintenance, boardMemberDiscount, total: roundToCents(rate.base + maintenance + tierOneAmount + tierTwoAmount - boardMemberDiscount) } }
 function Billing({ customers, activeCycle, rate, canManage, onSaveRate, onUpdateCycle }: { customers: Customer[]; activeCycle: ReadingCycle | null; rate: RateSchedule; canManage: boolean; onSaveRate: (rate: RateSchedule) => Promise<void>; onUpdateCycle: (cycle: ReadingCycle) => Promise<void> }) {
   const period = activeCycle ? `${activeCycle.startDate} – ${activeCycle.dueDate}` : 'No active checkpoint'
   const months = activeCycle?.months || 4
@@ -575,8 +576,8 @@ function Billing({ customers, activeCycle, rate, canManage, onSaveRate, onUpdate
         [c.name, service, billing, period, 'WATER-BASE', `Base charge (includes first ${formatNumber(rate.included)} CF)`, 1, rate.base, rate.base],
         [c.name, service, billing, period, 'MAINTENANCE', `Maintenance surcharge (${months} months)`, months, rate.maintenanceMonthly, b.maintenance],
         ...(b.boardMemberDiscount > 0 ? [[c.name, service, billing, period, 'BOARD-DISCOUNT', 'Board member base-rate discount', 1, -rate.boardMemberDiscount, -b.boardMemberDiscount]] : []),
-        ...(b.tierOneUnits ? [[c.name, service, billing, period, 'WATER-TIER-1', `Usage ${rate.included + 1}–${rate.tierOneEnd} CF`, Math.ceil(b.tierOneUnits / 100), rate.tierOne, b.tierOneAmount]] : []),
-        ...(b.tierTwoUnits ? [[c.name, service, billing, period, 'WATER-TIER-2', `Usage ${rate.tierOneEnd + 1}+ CF`, Math.ceil(b.tierTwoUnits / 100), rate.tierTwo, b.tierTwoAmount]] : []),
+        ...(b.tierOneUnits ? [[c.name, service, billing, period, 'WATER-TIER-1', `Usage ${rate.included + 1}–${rate.tierOneEnd} CF`, roundToCents(b.tierOneUnits / 100), rate.tierOne, b.tierOneAmount]] : []),
+        ...(b.tierTwoUnits ? [[c.name, service, billing, period, 'WATER-TIER-2', `Usage ${rate.tierOneEnd + 1}+ CF`, roundToCents(b.tierTwoUnits / 100), rate.tierTwo, b.tierTwoAmount]] : []),
       ]
     }).map(row => row.map(value => `"${String(value).replaceAll('"', '""')}"`).join(','))
     const blob = new Blob([[header, ...body].join('\n')], { type: 'text/csv' })
@@ -592,7 +593,7 @@ function Billing({ customers, activeCycle, rate, canManage, onSaveRate, onUpdate
     <div className="billing-controls"><label>Billing period<input value={period} readOnly /></label><div className="billing-summary"><span>{rows.length} invoices ready</span><strong>{money(total)}</strong><small>estimated total</small></div></div>
     <div className="rate-banner"><div className="rate-badge">$</div><div><strong>Current rate schedule</strong><span>Base {money(rate.base)} / cycle · Includes first {formatNumber(rate.included)} CF · Maintenance {money(rate.maintenanceMonthly)} / month · Board member discount {money(rate.boardMemberDiscount)} / cycle · Usage billed per 100 CF</span></div>{canManage && <button onClick={() => setSettingsOpen(true)}>Manage rates & period <Icon name="arrow" /></button>}</div>
     <div className="panel billing-table"><div className="table-head"><span>Customer</span><span>Usage (CF)</span><span>Line-item breakdown</span><span>Total</span></div>{rows.map(c => { const b = billFor(c, rate, months); return <div className="billing-row" key={c.id}><div><strong>{c.name}</strong><span>{formattedAddress(c, true)}</span>{c.boardMember && <span className="board-member-label">Board member</span>}</div><div><strong>{formatNumber(b.usage)} CF</strong><span>Current {formatNumber(c.current!)} CF</span></div><div className="line-items"><span>Base <b>{money(rate.base)}</b></span><span>Maintenance ({months} mo) <b>{money(b.maintenance)}</b></span>{b.boardMemberDiscount > 0 && <span>Board member discount <b>{money(-b.boardMemberDiscount)}</b></span>}{b.tierOneAmount > 0 && <span>Tier 1 · {formatNumber(b.tierOneUnits)} CF <b>{money(b.tierOneAmount)}</b></span>}{b.tierTwoAmount > 0 && <span>Tier 2 · {formatNumber(b.tierTwoUnits)} CF <b>{money(b.tierTwoAmount)}</b></span>}</div><strong className="bill-total">{money(b.total)}</strong></div>})}</div>
-    <p className="billing-note">Meter usage is measured in CF. Usage rates are applied per 100 CF, with each tier rounded up to the next 100 CF. Board member discounts apply to the base charge per billing period. Billing period and rates are editable by administrators.</p>
+    <p className="billing-note">Meter usage is measured in CF. Partial 100-CF usage is prorated, with charges rounded to the nearest cent. Board member discounts apply to the base charge per billing period. Billing period and rates are editable by administrators.</p>
     {settingsOpen && <BillingSettingsModal rate={rate} cycle={activeCycle} onClose={() => setSettingsOpen(false)} onSaveRate={onSaveRate} onUpdateCycle={onUpdateCycle} />}
   </>
 }
