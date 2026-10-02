@@ -16,7 +16,8 @@
 .mobile-menu{display:none;background:#eaf4f2;color:#2f7f7c;width:40px;height:40px;border:1px solid #d5e7e4;border-radius:8px;align-items:center;justify-content:center}.mobile-menu .icon{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round}
 @media(max-width:700px){.mobile-menu{display:flex}}
 .full-map-backdrop{z-index:1000}
-.full-map-head>div{flex:1;min-width:0}.full-map-menu{flex:none;margin-right:10px}.full-map-close{flex:none}
+.full-map-head>div{flex:1;min-width:0}.full-map-menu{flex:none;margin-right:10px;display:flex!important}.full-map-close{flex:none}
+.meter-notes-section{border-top:1px solid #edf2f1;padding-top:16px;margin-top:17px}.meter-notes-section label{display:block;font-size:11px;color:#74878a}.meter-notes-section textarea{display:block;width:100%;min-height:78px;margin-top:6px;border:1px solid #dae6e5;border-radius:5px;padding:10px;outline:none;resize:vertical;color:#31535a;font-size:12px;line-height:1.45}.meter-notes-section textarea:focus{border-color:#61aaa3;box-shadow:0 0 0 3px #e4f5f2}.meter-notes-section small{display:block;margin-top:5px;color:#647b80;font-size:10px}.map-meter-notes{white-space:normal;max-width:250px}.map-move-hint{font-size:10px!important}
 
 /* Readability and route interaction improvements */
 body{font-size:15px}

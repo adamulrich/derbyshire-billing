@@ -6,7 +6,7 @@ type View = 'dashboard' | 'readings' | 'route' | 'customers' | 'billing' | 'user
 type Role = 'meter-reader' | 'administrator'
 type Customer = {
   id: string | number; name: string; address: string; serviceAddress1?: string; serviceAddress2?: string; serviceCity?: string; serviceState?: string; serviceZip?: string; billingSameAsService?: boolean; billingAddress1?: string; billingAddress2?: string; billingCity?: string; billingState?: string; billingZip?: string; phone: string; email: string
-  previous: number; current: number | null; lastRead: string | null; route: number; lat: number; lng: number; accountNumber?: string; partTimeFullTime?: string; meterInstalled?: string; residents?: string; ownerTenant?: string; notes?: string; business?: string; parcelId?: string; connectionStatus?: string; phone2?: string; email2?: string; paperlessBilling?: string; geocodeSource?: string; geocodeDisplayName?: string; geocodedAt?: string; boardMember?: boolean
+  previous: number; current: number | null; lastRead: string | null; route: number; lat: number; lng: number; accountNumber?: string; partTimeFullTime?: string; meterInstalled?: string; residents?: string; ownerTenant?: string; notes?: string; meterNotes?: string; business?: string; parcelId?: string; connectionStatus?: string; phone2?: string; email2?: string; paperlessBilling?: string; geocodeSource?: string; geocodeDisplayName?: string; geocodedAt?: string; boardMember?: boolean
 }
 type UserAccount = { id: string | number; name: string; email: string; role: Role; active: boolean; passwordSetAt: string }
 type ReadingCycle = { id: string | number; name: string; startDate: string; dueDate: string; months: number; status: 'open' | 'closed' }
@@ -66,6 +66,7 @@ function customerFromParse(object: Parse.Object): Customer {
     residents: object.get('residents') || '',
     ownerTenant: object.get('ownerTenant') || '',
     notes: object.get('notes') || '',
+    meterNotes: object.get('meterNotes') || '',
     business: object.get('business') || '',
     parcelId: object.get('parcelId') || '',
     connectionStatus: object.get('connectionStatus') || '',
@@ -122,6 +123,7 @@ async function saveCustomerToParse(customer: Customer): Promise<Customer> {
   object.set('residents', customer.residents || '')
   object.set('ownerTenant', customer.ownerTenant || '')
   object.set('notes', customer.notes || '')
+  object.set('meterNotes', customer.meterNotes || '')
   object.set('business', customer.business || '')
   object.set('parcelId', customer.parcelId || '')
   object.set('connectionStatus', customer.connectionStatus || '')
@@ -145,7 +147,7 @@ async function exportCustomersXlsx(customers: Customer[]) {
   const headers = [
     'Route', 'Account Number', 'Customer Name', 'Service Address 1', 'Service Address 2', 'Service City', 'Service State', 'Service ZIP',
     'Billing Address 1', 'Billing Address 2', 'Billing City', 'Billing State', 'Billing ZIP', 'Phone 1', 'Phone 2', 'Email 1', 'Email 2',
-    'Parcel ID', 'Owner/Tenant', 'How Many Residents', 'Part/Full Time', 'Meter Installed', 'Connection Status', 'Notes', 'Business',
+    'Parcel ID', 'Owner/Tenant', 'How Many Residents', 'Part/Full Time', 'Meter Installed', 'Connection Status', 'Notes', 'Water Meter Notes', 'Business',
     'Paperless Billing', 'Previous Meter Reading (CF)', 'Current Meter Reading (CF)', 'Last Read', 'Latitude', 'Longitude', 'Geocoding Source', 'Geocoded Display Name', 'Geocoded Date', 'Board Member',
   ]
   const rows = [...customers].sort((a, b) => a.route - b.route).map(customer => {
@@ -154,7 +156,7 @@ async function exportCustomersXlsx(customers: Customer[]) {
     return [
       customer.route, customer.accountNumber || '', customer.name, service.line1, service.line2, service.city, service.state, service.zip,
       billing.line1, billing.line2, billing.city, billing.state, billing.zip, customer.phone || '', customer.phone2 || '', customer.email || '', customer.email2 || '',
-      customer.parcelId || '', customer.ownerTenant || '', customer.residents || '', customer.partTimeFullTime || '', customer.meterInstalled || '', customer.connectionStatus || '', customer.notes || '', customer.business || '',
+      customer.parcelId || '', customer.ownerTenant || '', customer.residents || '', customer.partTimeFullTime || '', customer.meterInstalled || '', customer.connectionStatus || '', customer.notes || '', customer.meterNotes || '', customer.business || '',
       customer.paperlessBilling || '', customer.previous, customer.current === null ? '' : customer.current, customer.lastRead || '', customer.lat || '', customer.lng || '', customer.geocodeSource || '', customer.geocodeDisplayName || '', customer.geocodedAt || '', customer.boardMember ? 'Yes' : 'No',
     ]
   })
@@ -266,6 +268,7 @@ function RealMap({ customers, editable = false, onMove }: { customers: Customer[
       const status = document.createElement('span')
       status.textContent = customer.current === null ? 'Needs reading' : `Read ${formatNumber(customer.current)} CF`
       popup.append(title, name, status)
+      if (customer.meterNotes?.trim()) { const meterNotes = document.createElement('span'); meterNotes.className = 'map-meter-notes'; meterNotes.textContent = `Meter: ${customer.meterNotes}`; popup.append(meterNotes) }
       if (editable) { const hint = document.createElement('span'); hint.className = 'map-move-hint'; hint.textContent = 'Drag pin to adjust location'; popup.append(hint) }
       marker.bindPopup(popup)
     })
@@ -703,6 +706,7 @@ function CustomerModal({ customer, onClose, onSave, onDelete }: { customer: Cust
     <div className="form-grid"><label>Customer name<input value={draft.name} onChange={e => set('name', e.target.value)} required /></label><label>Phone<input value={draft.phone} onChange={e => set('phone', e.target.value)} /></label><label>Email<input type="email" value={draft.email} onChange={e => set('email', e.target.value)} /></label></div>
     <label className="same-address board-member-toggle"><input type="checkbox" checked={draft.boardMember === true} onChange={e => set('boardMember', e.target.checked)} /> Board member <span>Applies the configured base-rate discount.</span></label>
     <div className="address-section"><h3>Service address</h3><div className="address-grid"><label>Address 1<input value={draft.serviceAddress1 || ''} onChange={e => { set('serviceAddress1', e.target.value); setLocationMessage('') }} required /></label><label>Address 2<input value={draft.serviceAddress2 || ''} onChange={e => { set('serviceAddress2', e.target.value); setLocationMessage('') }} /></label><label>City<input value={draft.serviceCity || ''} onChange={e => { set('serviceCity', e.target.value); setLocationMessage('') }} required /></label><label>State<input value={draft.serviceState || ''} onChange={e => { set('serviceState', e.target.value); setLocationMessage('') }} required /></label><label>ZIP<input value={draft.serviceZip || ''} onChange={e => { set('serviceZip', e.target.value); setLocationMessage('') }} required /></label></div><button type="button" className="locate-button" onClick={locate} disabled={locating || !formattedAddress(draft).trim()}><Icon name="map" /> {locating ? 'Locating…' : draft.lat !== 0 ? 'Update service location' : 'Locate service address'}</button>{locationMessage && <small className="location-message">{locationMessage}</small>}</div>
+    <div className="meter-notes-section"><label>Water meter notes<textarea rows={3} value={draft.meterNotes || ''} onChange={e => set('meterNotes', e.target.value)} placeholder="Describe where the meter is located, access details, or other field notes." /></label><small>Shared with administrators and meter readers.</small></div>
     <label className="same-address"><input type="checkbox" checked={sameBilling} onChange={e => set('billingSameAsService', e.target.checked)} /> Billing address is the same as service address</label>
     {!sameBilling && <div className="address-section"><h3>Billing address</h3><div className="address-grid"><label>Address 1<input value={draft.billingAddress1 || ''} onChange={e => set('billingAddress1', e.target.value)} required /></label><label>Address 2<input value={draft.billingAddress2 || ''} onChange={e => set('billingAddress2', e.target.value)} /></label><label>City<input value={draft.billingCity || ''} onChange={e => set('billingCity', e.target.value)} required /></label><label>State<input value={draft.billingState || ''} onChange={e => set('billingState', e.target.value)} required /></label><label>ZIP<input value={draft.billingZip || ''} onChange={e => set('billingZip', e.target.value)} required /></label></div></div>}
     <div className="modal-foot customer-modal-foot">{!String(customer.id).startsWith('temp-') && <button type="button" className="danger-button" onClick={() => setDeleteOpen(true)}><Icon name="trash" /> Delete customer</button>}<span className="modal-foot-spacer" /><button className="secondary" onClick={onClose}>Cancel</button><button className="primary" onClick={() => onSave({ ...draft, address: formattedAddress(draft), billingSameAsService: sameBilling })}>Save customer</button></div>
