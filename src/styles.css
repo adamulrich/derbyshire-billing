@@ -63,6 +63,8 @@ body{font-size:15px}
 .readings-page .net-usage strong.negative{color:#a86417}
 .readings-page .reading-input{width:175px}
 .readings-page .input-wrap{height:42px;border-color:#bdd0d1;background:#fff}
+.readings-page .previous .input-wrap.locked{background:#f3f7f7;cursor:default}
+.readings-page .previous .input-wrap.locked input{cursor:default}
 .readings-page .input-wrap input{font-size:14px;color:#183f48;padding:0 10px}
 .readings-page .input-wrap input::placeholder{color:#60767b;opacity:1}
 .readings-page .input-wrap span{font-size:11px;color:#60777b;padding-right:10px}
