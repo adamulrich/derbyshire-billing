@@ -28,6 +28,19 @@ function userPayload(user) {
   }
 }
 
+function paymentPayload(payment) {
+  const customer = payment.get('customer')
+  return {
+    id: payment.id,
+    customerId: customer && customer.id ? customer.id : payment.get('customerId') || '',
+    amount: Number(payment.get('amount') || 0),
+    paymentDate: payment.get('paymentDate') || '',
+    method: payment.get('method') || 'Other',
+    reference: payment.get('reference') || '',
+    notes: payment.get('notes') || '',
+  }
+}
+
 Parse.Cloud.define('adminListUsers', async request => {
   administrator(request)
   try {
@@ -75,4 +88,34 @@ Parse.Cloud.define('adminSetUserActive', async request => {
   user.set('active', request.params.active !== false)
   await user.save(null, { useMasterKey: true })
   return userPayload(user)
+})
+
+Parse.Cloud.define('adminListPayments', async request => {
+  administrator(request)
+  const query = new Parse.Query('Payment')
+  query.include('customer')
+  query.descending('paymentDate')
+  query.limit(1000)
+  const payments = await query.find({ useMasterKey: true })
+  return payments.map(paymentPayload)
+})
+
+Parse.Cloud.define('adminRecordPayment', async request => {
+  const admin = administrator(request)
+  const customerId = String(request.params.customerId || '')
+  const amount = Number(request.params.amount)
+  if (!customerId || !Number.isFinite(amount) || amount <= 0) {
+    throw new Parse.Error(Parse.Error.INVALID_QUERY, 'A customer and a positive payment amount are required.')
+  }
+  const customer = await new Parse.Query('Customer').get(customerId, { useMasterKey: true })
+  const payment = new Parse.Object('Payment')
+  payment.set('customer', customer)
+  payment.set('amount', Math.round(amount * 100) / 100)
+  payment.set('paymentDate', String(request.params.paymentDate || new Date().toISOString().slice(0, 10)))
+  payment.set('method', String(request.params.method || 'Other'))
+  payment.set('reference', String(request.params.reference || ''))
+  payment.set('notes', String(request.params.notes || ''))
+  payment.set('enteredBy', admin)
+  await payment.save(null, { useMasterKey: true })
+  return paymentPayload(payment)
 })

@@ -2,15 +2,16 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import L from 'leaflet'
 import Parse from './lib/parse'
 
-type View = 'dashboard' | 'readings' | 'route' | 'customers' | 'billing' | 'users'
+type View = 'dashboard' | 'readings' | 'route' | 'customers' | 'billing' | 'accounts' | 'users'
 type Role = 'meter-reader' | 'administrator'
 type Customer = {
   id: string | number; name: string; address: string; serviceAddress1?: string; serviceAddress2?: string; serviceCity?: string; serviceState?: string; serviceZip?: string; billingSameAsService?: boolean; billingAddress1?: string; billingAddress2?: string; billingCity?: string; billingState?: string; billingZip?: string; phone: string; email: string
-  previous: number; current: number | null; lastRead: string | null; route: number; lat: number; lng: number; accountNumber?: string; partTimeFullTime?: string; meterInstalled?: string; residents?: string; ownerTenant?: string; notes?: string; meterNotes?: string; business?: string; parcelId?: string; connectionStatus?: string; phone2?: string; email2?: string; paperlessBilling?: string; geocodeSource?: string; geocodeDisplayName?: string; geocodedAt?: string; boardMember?: boolean
+  previous: number; current: number | null; lastRead: string | null; route: number; lat: number; lng: number; priorBalance?: number; accountNumber?: string; partTimeFullTime?: string; meterInstalled?: string; residents?: string; ownerTenant?: string; notes?: string; meterNotes?: string; business?: string; parcelId?: string; connectionStatus?: string; phone2?: string; email2?: string; paperlessBilling?: boolean | string; geocodeSource?: string; geocodeDisplayName?: string; geocodedAt?: string; boardMember?: boolean
 }
 type UserAccount = { id: string | number; name: string; email: string; role: Role; active: boolean; passwordSetAt: string }
 type ReadingCycle = { id: string | number; name: string; startDate: string; dueDate: string; months: number; status: 'open' | 'closed' }
 type RateSchedule = { id: string | number; base: number; maintenanceMonthly: number; included: number; tierOneEnd: number; tierOne: number; tierTwo: number; boardMemberDiscount: number; effectiveDate: string }
+type Payment = { id: string | number; customerId: string | number; amount: number; paymentDate: string; method: string; reference: string; notes: string }
 
 const RATE: RateSchedule = { id: 'default-rate', base: 265.23, maintenanceMonthly: 40, included: 4000, tierOneEnd: 8000, tierOne: 3.50, tierTwo: 3.93, boardMemberDiscount: 170, effectiveDate: '2026-09-01' }
 const initialCustomers: Customer[] = [
@@ -56,6 +57,7 @@ function customerFromParse(object: Parse.Object): Customer {
     email: object.get('email') || '',
     previous: Number(object.get('previous') || 0),
     current: object.get('current') === undefined || object.get('current') === null ? null : Number(object.get('current')),
+    priorBalance: Number(object.get('priorBalance') || 0),
     lastRead: object.get('lastRead') || null,
     route: Number(object.get('route') || 0),
     lat: Number(object.get('lat') || 39.25),
@@ -72,7 +74,7 @@ function customerFromParse(object: Parse.Object): Customer {
     connectionStatus: object.get('connectionStatus') || '',
     phone2: object.get('phone2') || '',
     email2: object.get('email2') || '',
-    paperlessBilling: object.get('paperlessBilling') || '',
+    paperlessBilling: object.get('paperlessBilling') === true || String(object.get('paperlessBilling') || '').trim().toLowerCase().startsWith('y') || String(object.get('paperlessBilling') || '').trim().toLowerCase() === 'true',
     geocodeSource: object.get('geocodeSource') || '',
     geocodeDisplayName: object.get('geocodeDisplayName') || '',
     geocodedAt: object.get('geocodedAt') || '',
@@ -87,6 +89,10 @@ function cycleFromParse(object: Parse.Object): ReadingCycle {
 function migrateRate(rate: Partial<RateSchedule> | null | undefined): RateSchedule { const next = { ...RATE, ...(rate || {}) }; return next.included === 40 && next.tierOneEnd === 80 ? { ...next, included: 4000, tierOneEnd: 8000 } : next }
 function rateFromParse(object: Parse.Object): RateSchedule {
   return migrateRate({ id: object.id || '', base: Number(object.get('base') ?? RATE.base), maintenanceMonthly: Number(object.get('maintenanceMonthly') ?? RATE.maintenanceMonthly), included: Number(object.get('included') ?? RATE.included), tierOneEnd: Number(object.get('tierOneEnd') ?? RATE.tierOneEnd), tierOne: Number(object.get('tierOne') ?? RATE.tierOne), tierTwo: Number(object.get('tierTwo') ?? RATE.tierTwo), boardMemberDiscount: Number(object.get('boardMemberDiscount') ?? RATE.boardMemberDiscount), effectiveDate: object.get('effectiveDate') || today })
+}
+function paymentFromParse(object: Parse.Object): Payment {
+  const customer = object.get('customer') as Parse.Object | undefined
+  return { id: object.id || '', customerId: customer?.id || object.get('customerId') || '', amount: Number(object.get('amount') || 0), paymentDate: object.get('paymentDate') || today, method: object.get('method') || 'Check', reference: object.get('reference') || '', notes: object.get('notes') || '' }
 }
 
 async function saveCustomerToParse(customer: Customer): Promise<Customer> {
@@ -113,6 +119,7 @@ async function saveCustomerToParse(customer: Customer): Promise<Customer> {
   object.set('email', customer.email)
   object.set('previous', customer.previous)
   object.set('current', customer.current)
+  object.set('priorBalance', Number(customer.priorBalance || 0))
   object.set('lastRead', customer.lastRead)
   object.set('route', customer.route)
   object.set('lat', customer.lat)
@@ -129,7 +136,7 @@ async function saveCustomerToParse(customer: Customer): Promise<Customer> {
   object.set('connectionStatus', customer.connectionStatus || '')
   object.set('phone2', customer.phone2 || '')
   object.set('email2', customer.email2 || '')
-  object.set('paperlessBilling', customer.paperlessBilling || '')
+  object.set('paperlessBilling', customer.paperlessBilling === true ? 'Yes' : 'No')
   object.set('geocodeSource', customer.geocodeSource || '')
   object.set('geocodeDisplayName', customer.geocodeDisplayName || '')
   object.set('geocodedAt', customer.geocodedAt || '')
@@ -148,7 +155,7 @@ async function exportCustomersXlsx(customers: Customer[]) {
     'Route', 'Account Number', 'Customer Name', 'Service Address 1', 'Service Address 2', 'Service City', 'Service State', 'Service ZIP',
     'Billing Address 1', 'Billing Address 2', 'Billing City', 'Billing State', 'Billing ZIP', 'Phone 1', 'Phone 2', 'Email 1', 'Email 2',
     'Parcel ID', 'Owner/Tenant', 'How Many Residents', 'Part/Full Time', 'Meter Installed', 'Connection Status', 'Notes', 'Water Meter Notes', 'Business',
-    'Paperless Billing', 'Previous Meter Reading (CF)', 'Current Meter Reading (CF)', 'Last Read', 'Latitude', 'Longitude', 'Geocoding Source', 'Geocoded Display Name', 'Geocoded Date', 'Board Member',
+    'Paperless Billing', 'Prior Balance', 'Previous Meter Reading (CF)', 'Current Meter Reading (CF)', 'Last Read', 'Latitude', 'Longitude', 'Geocoding Source', 'Geocoded Display Name', 'Geocoded Date', 'Board Member',
   ]
   const rows = [...customers].sort((a, b) => a.route - b.route).map(customer => {
     const service = addressParts(customer)
@@ -157,7 +164,7 @@ async function exportCustomersXlsx(customers: Customer[]) {
       customer.route, customer.accountNumber || '', customer.name, service.line1, service.line2, service.city, service.state, service.zip,
       billing.line1, billing.line2, billing.city, billing.state, billing.zip, customer.phone || '', customer.phone2 || '', customer.email || '', customer.email2 || '',
       customer.parcelId || '', customer.ownerTenant || '', customer.residents || '', customer.partTimeFullTime || '', customer.meterInstalled || '', customer.connectionStatus || '', customer.notes || '', customer.meterNotes || '', customer.business || '',
-      customer.paperlessBilling || '', customer.previous, customer.current === null ? '' : customer.current, customer.lastRead || '', customer.lat || '', customer.lng || '', customer.geocodeSource || '', customer.geocodeDisplayName || '', customer.geocodedAt || '', customer.boardMember ? 'Yes' : 'No',
+      customer.paperlessBilling === true || String(customer.paperlessBilling || '').trim().toLowerCase().startsWith('y') ? 'Yes' : 'No', customer.priorBalance || 0, customer.previous, customer.current === null ? '' : customer.current, customer.lastRead || '', customer.lat || '', customer.lng || '', customer.geocodeSource || '', customer.geocodeDisplayName || '', customer.geocodedAt || '', customer.boardMember ? 'Yes' : 'No',
     ]
   })
   const title = 'Derbyshire Water District Customer Export'
@@ -311,7 +318,7 @@ function RealMap({ customers, editable = false, onMove, onSaveReading }: { custo
 
 function App({ parseReady = false }: { parseReady?: boolean }) {
   const [view, setView] = useState<View>(() => {
-    const validViews: View[] = ['dashboard', 'readings', 'route', 'customers', 'billing', 'users']
+    const validViews: View[] = ['dashboard', 'readings', 'route', 'customers', 'billing', 'accounts', 'users']
     try {
       const savedView = localStorage.getItem('derbyshire-view') as View | null
       return savedView && validViews.includes(savedView) ? savedView : 'dashboard'
@@ -347,11 +354,16 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
     if (parseReady) return []
     try { return JSON.parse(localStorage.getItem('derbyshire-users') || 'null') || initialUsers } catch { return initialUsers }
   })
+  const [payments, setPayments] = useState<Payment[]>(() => {
+    if (parseReady) return []
+    try { return JSON.parse(localStorage.getItem('derbyshire-payments') || '[]') } catch { return [] }
+  })
 
   useEffect(() => { if (!parseReady) localStorage.setItem('derbyshire-customers', JSON.stringify(customers)) }, [customers, parseReady])
   useEffect(() => { if (!parseReady) localStorage.setItem('derbyshire-cycles', JSON.stringify(cycles)) }, [cycles, parseReady])
   useEffect(() => { if (!parseReady) localStorage.setItem('derbyshire-rate', JSON.stringify(rate)) }, [rate, parseReady])
   useEffect(() => { if (!parseReady) localStorage.setItem('derbyshire-users', JSON.stringify(users)) }, [users, parseReady])
+  useEffect(() => { if (!parseReady) localStorage.setItem('derbyshire-payments', JSON.stringify(payments)) }, [payments, parseReady])
   useEffect(() => { try { localStorage.setItem('derbyshire-view', view) } catch { /* Ignore unavailable browser storage. */ } }, [view])
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(''), 2800); return () => clearTimeout(t) } }, [toast])
   useEffect(() => {
@@ -368,14 +380,16 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
       new Parse.Query('ReadingCycle').descending('startDate').limit(100).find(),
       new Parse.Query('RateSchedule').descending('effectiveDate').first(),
       !isMeterReader ? Parse.Cloud.run('adminListUsers') as Promise<UserAccount[]> : Promise.resolve([]),
+      !isMeterReader ? (Parse.Cloud.run('adminListPayments').catch(() => []) as Promise<Payment[]>) : Promise.resolve([]),
     ])
-      .then(([customerObjects, cycleObjects, rateObject, userObjects]) => {
+      .then(([customerObjects, cycleObjects, rateObject, userObjects, paymentObjects]) => {
         setCustomers(customerObjects.map(customerFromParse))
         const loadedCycles = cycleObjects.map(cycleFromParse)
         setCycles(loadedCycles)
         setActiveCycleId(loadedCycles.find(cycle => cycle.status === 'open')?.id || loadedCycles[0]?.id || '')
         if (rateObject) setRate(rateFromParse(rateObject))
         setUsers(userObjects)
+        setPayments(paymentObjects as Payment[])
       })
       .catch(error => setAuthError(error instanceof Error ? error.message : 'Could not load customer data.'))
       .finally(() => setDataLoading(false))
@@ -526,6 +540,26 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
     }
     setUsers(items => items.map(user => user.id === id ? { ...user, active: !user.active } : user))
   }
+  const recordPayment = async (payment: Omit<Payment, 'id'>) => {
+    try {
+      let saved: Payment
+      if (parseReady) {
+        saved = await Parse.Cloud.run('adminRecordPayment', payment) as Payment
+      } else saved = { ...payment, id: `payment-${Date.now()}` }
+      setPayments(items => [saved, ...items])
+      setToast(parseReady ? 'Payment recorded in Back4App' : 'Payment recorded in demo mode')
+    } catch (error) { setToast(error instanceof Error ? error.message : 'Could not record payment') }
+  }
+  const setPriorBalance = async (id: string | number, amount: number) => {
+    const customer = customers.find(item => String(item.id) === String(id))
+    if (!customer || !Number.isFinite(amount)) return
+    try {
+      const updated = { ...customer, priorBalance: roundToCents(amount) }
+      const saved = parseReady ? await saveCustomerToParse(updated) : updated
+      setCustomers(items => items.map(item => String(item.id) === String(id) ? saved : item))
+      setToast(`Prior balance saved for ${customer.name}`)
+    } catch (error) { setToast(error instanceof Error ? error.message : 'Could not save prior balance') }
+  }
 
   const logIn = async (username: string, password: string) => {
     setAuthLoading(true); setAuthError('')
@@ -546,13 +580,13 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
       <div className="brand"><div className="brand-mark">D</div><div><strong>Derbyshire</strong><span>Water District</span></div><button className="mobile-close" onClick={() => setMobileMenuOpen(false)}><Icon name="close" /></button></div>
       <div className="workspace-label">WORKSPACE</div>
       <nav>{([
-        ['dashboard', 'grid', 'Overview'], ['readings', 'gauge', 'Read meters'], ['route', 'map', 'Route plan'], ['customers', 'users', 'Customers'], ['billing', 'receipt', 'Billing export'], ...(role === 'administrator' ? [['users', 'users', 'Users'] as [View, string, string]] : []),
+        ['dashboard', 'grid', 'Overview'], ['readings', 'gauge', 'Read meters'], ['route', 'map', 'Route plan'], ['customers', 'users', 'Customers'], ['billing', 'receipt', 'Billing export'], ...(role === 'administrator' ? [['accounts', 'receipt', 'Balances & payments'] as [View, string, string], ['users', 'users', 'Users'] as [View, string, string]] : []),
       ] as [View, string, string][]).map(([key, icon, label]) => <button key={key} className={view === key ? 'nav-item active' : 'nav-item'} onClick={() => navigate(key)}><Icon name={icon} /><span>{label}</span>{key === 'readings' && unread > 0 && <em>{unread}</em>}</button>)}</nav>
       <div className="sidebar-bottom"><div className="secure"><Icon name="lock" /><div><strong>{parseReady ? 'Parse connected' : 'Demo workspace'}</strong><span>{parseReady ? 'Back4App protected' : 'Add env.local'}</span></div></div><div className="user-card"><div className="avatar">{displayInitials}</div><div><strong>{displayName}</strong><span>{role === 'meter-reader' ? 'Meter reader' : 'Administrator'}</span></div><button className="more" title={parseReady ? 'Sign out' : 'Switch role'} onClick={() => parseReady ? logOut() : setRole(role === 'meter-reader' ? 'administrator' : 'meter-reader')}>{parseReady ? '↪' : '↕'}</button></div></div>
     </aside>
     {mobileMenuOpen && <button className="mobile-nav-backdrop" aria-label="Close menu" onClick={() => setMobileMenuOpen(false)} />}
     <main className="main"><header className="topbar"><button className="mobile-menu" aria-label="Open menu" title="Open menu" onClick={() => setMobileMenuOpen(true)}><Icon name="menu" /></button><div className="crumb">{activeCycle?.name || 'No active checkpoint'} <span>·</span> {activeCycle ? `Due ${activeCycle.dueDate}` : 'Create one to begin'}</div><div className="top-actions"><button className="help" aria-label="Help" title="Help">?</button><button className="role-pill" onClick={() => parseReady ? logOut() : setRole(role === 'meter-reader' ? 'administrator' : 'meter-reader')}>{parseReady ? 'Sign out' : role === 'meter-reader' ? 'Meter reader' : 'Administrator'} <span>{parseReady ? '↪' : '⌄'}</span></button></div></header>
-      <div className="content">{dataLoading && <div className="data-loading"><span className="loading-dot" /> Loading customer data from Back4App…</div>}{view === 'dashboard' && <Dashboard customers={customers} unread={unread} readCount={readCount} navigate={navigate} rate={rate} activeCycle={activeCycle} userName={displayName} />}{view === 'readings' && <Readings customers={customers} activeCycle={activeCycle} onSave={saveReading} onSavePrevious={savePreviousReading} onCreateCycle={createCycle} onMoveLocation={moveCustomerLocation} />}{view === 'route' && <RoutePlan customers={customers} onMove={moveRoute} onReorder={reorderRoute} onMenu={() => setMobileMenuOpen(true)} onMoveLocation={moveCustomerLocation} />}{view === 'customers' && <Customers customers={customers} onEdit={setEditing} onAdd={() => setEditing({ id: `temp-${Date.now()}`, name: '', address: '', phone: '', email: '', previous: 0, current: null, lastRead: null, route: customers.length + 1, lat: 0, lng: 0 })} />}{view === 'billing' && <Billing customers={customers} activeCycle={activeCycle} rate={rate} canManage={role === 'administrator'} onSaveRate={async nextRate => { try { let object: Parse.Object; if (parseReady && typeof nextRate.id === 'string' && nextRate.id !== 'default-rate') object = await new Parse.Query('RateSchedule').get(nextRate.id); else object = new Parse.Object('RateSchedule'); Object.entries(nextRate).forEach(([key, value]) => { if (key !== 'id') object.set(key, value) }); const saved = parseReady ? rateFromParse(await object.save()) : nextRate; setRate(saved); setToast(parseReady ? 'Rate schedule saved to Back4App' : 'Rate schedule updated') } catch (error) { setToast(error instanceof Error ? error.message : 'Could not save rates') } }} onUpdateCycle={async nextCycle => { if (parseReady && typeof nextCycle.id === 'string' && nextCycle.id !== 'demo-cycle') { const object = await new Parse.Query('ReadingCycle').get(nextCycle.id); object.set('name', nextCycle.name); object.set('startDate', nextCycle.startDate); object.set('dueDate', nextCycle.dueDate); object.set('months', nextCycle.months); await object.save() } setCycles(items => items.map(item => item.id === nextCycle.id ? nextCycle : item)); setToast('Billing period updated') }} />}{view === 'users' && role === 'administrator' && <Users users={users} onAdd={addUser} onToggle={toggleUser} />}</div>
+      <div className="content">{dataLoading && <div className="data-loading"><span className="loading-dot" /> Loading customer data from Back4App…</div>}{view === 'dashboard' && <Dashboard customers={customers} unread={unread} readCount={readCount} navigate={navigate} rate={rate} activeCycle={activeCycle} userName={displayName} />}{view === 'readings' && <Readings customers={customers} activeCycle={activeCycle} onSave={saveReading} onSavePrevious={savePreviousReading} onCreateCycle={createCycle} onMoveLocation={moveCustomerLocation} />}{view === 'route' && <RoutePlan customers={customers} onMove={moveRoute} onReorder={reorderRoute} onMenu={() => setMobileMenuOpen(true)} onMoveLocation={moveCustomerLocation} />}{view === 'customers' && <Customers customers={customers} onEdit={setEditing} onAdd={() => setEditing({ id: `temp-${Date.now()}`, name: '', address: '', phone: '', email: '', previous: 0, current: null, lastRead: null, route: customers.length + 1, lat: 0, lng: 0 })} />}{view === 'billing' && <Billing customers={customers} activeCycle={activeCycle} rate={rate} canManage={role === 'administrator'} onSaveRate={async nextRate => { try { let object: Parse.Object; if (parseReady && typeof nextRate.id === 'string' && nextRate.id !== 'default-rate') object = await new Parse.Query('RateSchedule').get(nextRate.id); else object = new Parse.Object('RateSchedule'); Object.entries(nextRate).forEach(([key, value]) => { if (key !== 'id') object.set(key, value) }); const saved = parseReady ? rateFromParse(await object.save()) : nextRate; setRate(saved); setToast(parseReady ? 'Rate schedule saved to Back4App' : 'Rate schedule updated') } catch (error) { setToast(error instanceof Error ? error.message : 'Could not save rates') } }} onUpdateCycle={async nextCycle => { if (parseReady && typeof nextCycle.id === 'string' && nextCycle.id !== 'demo-cycle') { const object = await new Parse.Query('ReadingCycle').get(nextCycle.id); object.set('name', nextCycle.name); object.set('startDate', nextCycle.startDate); object.set('dueDate', nextCycle.dueDate); object.set('months', nextCycle.months); await object.save() } setCycles(items => items.map(item => item.id === nextCycle.id ? nextCycle : item)); setToast('Billing period updated') }} />}{view === 'accounts' && role === 'administrator' && <Accounts customers={customers} rate={rate} activeCycle={activeCycle} payments={payments} onRecordPayment={recordPayment} onSetPriorBalance={setPriorBalance} />}{view === 'users' && role === 'administrator' && <Users users={users} onAdd={addUser} onToggle={toggleUser} />}</div>
     </main>
     {editing && <CustomerModal customer={editing} onClose={() => setEditing(null)} onSave={updateCustomer} onDelete={deleteCustomer} />}
     {confirmReading && <ConfirmModal customer={confirmReading.customer} value={confirmReading.value} onCancel={() => setConfirmReading(null)} onConfirm={() => saveReading(confirmReading.customer.id, confirmReading.value, true)} />}
@@ -614,6 +648,17 @@ function Customers({ customers, onEdit, onAdd }: { customers: Customer[]; onEdit
 }
 
 function billFor(c: Customer, rate: RateSchedule, months = 4) { const usage = c.current === null ? 0 : Math.max(0, c.current - c.previous); const tierOneUnits = Math.max(0, Math.min(usage, rate.tierOneEnd) - rate.included); const tierTwoUnits = Math.max(0, usage - rate.tierOneEnd); const tierOneAmount = roundToCents(tierOneUnits / 100 * rate.tierOne); const tierTwoAmount = roundToCents(tierTwoUnits / 100 * rate.tierTwo); const maintenance = roundToCents(rate.maintenanceMonthly * months); const boardMemberDiscount = c.boardMember === true ? rate.boardMemberDiscount : 0; return { usage, tierOneUnits, tierTwoUnits, tierOneAmount, tierTwoAmount, maintenance, boardMemberDiscount, total: roundToCents(rate.base + maintenance + tierOneAmount + tierTwoAmount - boardMemberDiscount) } }
+function Accounts({ customers, rate, activeCycle, payments, onRecordPayment, onSetPriorBalance }: { customers: Customer[]; rate: RateSchedule; activeCycle: ReadingCycle | null; payments: Payment[]; onRecordPayment: (payment: Omit<Payment, 'id'>) => Promise<void>; onSetPriorBalance: (id: string | number, amount: number) => Promise<void> }) {
+  const [query, setQuery] = useState('')
+  const [paymentFor, setPaymentFor] = useState<Customer | null>(null)
+  const [balanceFor, setBalanceFor] = useState<Customer | null>(null)
+  const rows = customers.map(customer => { const bill = billFor(customer, rate, activeCycle?.months || 4); const paid = payments.filter(payment => String(payment.customerId) === String(customer.id)).reduce((sum, payment) => sum + payment.amount, 0); const priorBalance = Number(customer.priorBalance || 0); return { customer, bill, paid, priorBalance, balance: roundToCents(priorBalance + bill.total - paid) } }).filter(row => `${row.customer.name} ${formattedAddress(row.customer)}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => lastNameForSort(a.customer.name).localeCompare(lastNameForSort(b.customer.name)))
+  const outstanding = rows.reduce((sum, row) => sum + Math.max(0, row.balance), 0)
+  const received = payments.reduce((sum, payment) => sum + payment.amount, 0)
+  return <><PageTitle eyebrow="ADMINISTRATION" title="Balances & payments" description="Account balances for the Treasurer, President, Vice President, and Secretary." /><div className="stat-grid account-stats"><Stat icon="receipt" label="Outstanding balance" value={money(outstanding)} detail="prior balance plus current billing" tone="amber" /><Stat icon="check" label="Payments received" value={money(received)} detail={`${payments.length} recorded payments`} tone="teal" /><Stat icon="users" label="Accounts" value={String(customers.length)} detail="sorted by last name" tone="blue" /></div><div className="toolbar"><div className="search"><Icon name="search" /><input placeholder="Search customers" value={query} onChange={e => setQuery(e.target.value)} /></div><span className="account-period">{activeCycle?.name || 'Current billing period'}</span></div><div className="panel account-table"><div className="table-head account-table-head"><span>Customer</span><span>Prior balance</span><span>Bill</span><span>Paid</span><span>Balance</span><span /></div>{rows.map(row => <div className="account-row" key={row.customer.id}><div><strong>{row.customer.name}</strong><span>{formattedAddress(row.customer, true)}</span></div><button className="link-button" onClick={() => setBalanceFor(row.customer)}>{money(row.priorBalance)} <small>Edit</small></button><strong>{money(row.bill.total)}</strong><span>{money(row.paid)}</span><strong className={row.balance > 0 ? 'balance-due' : 'balance-paid'}>{money(row.balance)}</strong><button className="primary small-primary" onClick={() => setPaymentFor(row.customer)}>Record payment</button></div>)}{rows.length === 0 && <div className="empty">No accounts match that search.</div>}</div><div className="panel payment-history"><div className="panel-head"><div><h2>Recent payments</h2><p>Payments are saved to Back4App and included in the customer ledger.</p></div></div>{payments.slice(0, 10).map(payment => { const customer = customers.find(item => String(item.id) === String(payment.customerId)); return <div className="payment-row" key={payment.id}><div><strong>{customer?.name || 'Unknown customer'}</strong><span>{payment.paymentDate} · {payment.method}{payment.reference ? ` · ${payment.reference}` : ''}</span></div><strong>{money(payment.amount)}</strong></div>})}{payments.length === 0 && <p className="billing-note">No payments have been recorded yet.</p>}</div>{paymentFor && <PaymentModal customer={paymentFor} onClose={() => setPaymentFor(null)} onSave={async payment => { await onRecordPayment(payment); setPaymentFor(null) }} />}{balanceFor && <PriorBalanceModal customer={balanceFor} onClose={() => setBalanceFor(null)} onSave={async amount => { await onSetPriorBalance(balanceFor.id, amount); setBalanceFor(null) }} />}</>
+}
+function PriorBalanceModal({ customer, onClose, onSave }: { customer: Customer; onClose: () => void; onSave: (amount: number) => Promise<void> }) { const [amount, setAmount] = useState(String(customer.priorBalance || 0)); return <div className="modal-backdrop"><form className="modal" onSubmit={async e => { e.preventDefault(); const value = Number(amount); if (!Number.isFinite(value)) return; await onSave(roundToCents(value)) }}><div className="modal-head"><div><div className="eyebrow">ACCOUNTING</div><h2>Set prior balance</h2><p className="modal-intro">Opening balance carried into the new payment process for {customer.name}.</p></div><button type="button" onClick={onClose}><Icon name="close" /></button></div><label>Prior balance or credit<input autoFocus type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} required /></label><p className="modal-intro">Positive values are amounts due. Negative values are customer credits.</p><div className="modal-foot"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button type="submit" className="primary">Save prior balance</button></div></form></div> }
+function PaymentModal({ customer, onClose, onSave }: { customer: Customer; onClose: () => void; onSave: (payment: Omit<Payment, 'id'>) => Promise<void> }) { const [amount, setAmount] = useState(''); const [paymentDate, setPaymentDate] = useState(today); const [method, setMethod] = useState('Check'); const [reference, setReference] = useState(''); const [notes, setNotes] = useState(''); return <div className="modal-backdrop"><form className="modal" onSubmit={async e => { e.preventDefault(); const value = Number(amount); if (!Number.isFinite(value) || value <= 0) return; await onSave({ customerId: customer.id, amount: roundToCents(value), paymentDate, method, reference: reference.trim(), notes: notes.trim() }) }}><div className="modal-head"><div><div className="eyebrow">ACCOUNTING</div><h2>Record payment</h2><p className="modal-intro">{customer.name} · {formattedAddress(customer, true)}</p></div><button type="button" onClick={onClose}><Icon name="close" /></button></div><div className="form-grid"><label>Amount<input autoFocus type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} required /></label><label>Payment date<input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} required /></label><label>Method<select value={method} onChange={e => setMethod(e.target.value)}><option>Check</option><option>Cash</option><option>ACH</option><option>Card</option><option>Other</option></select></label><label>Reference<input value={reference} onChange={e => setReference(e.target.value)} placeholder="Check number or confirmation" /></label></div><label className="wide-field">Notes<textarea rows={3} value={notes} onChange={e => setNotes(e.target.value)} /></label><div className="modal-foot"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button type="submit" className="primary" disabled={!amount || Number(amount) <= 0}>Save payment</button></div></form></div> }
 function Billing({ customers, activeCycle, rate, canManage, onSaveRate, onUpdateCycle }: { customers: Customer[]; activeCycle: ReadingCycle | null; rate: RateSchedule; canManage: boolean; onSaveRate: (rate: RateSchedule) => Promise<void>; onUpdateCycle: (cycle: ReadingCycle) => Promise<void> }) {
   const period = activeCycle ? `${activeCycle.startDate} – ${activeCycle.dueDate}` : 'No active checkpoint'
   const months = activeCycle?.months || 4
@@ -705,7 +750,7 @@ function BillingSettingsModal({ rate, cycle, onClose, onSaveRate, onUpdateCycle 
 function CustomerModal({ customer, onClose, onSave, onDelete }: { customer: Customer; onClose: () => void; onSave: (c: Customer) => void; onDelete: (c: Customer) => Promise<void> }) {
   const service = addressParts(customer)
   const billing = addressParts(customer, true)
-  const [draft, setDraft] = useState({ ...customer, boardMember: customer.boardMember === true, serviceAddress1: service.line1, serviceAddress2: service.line2, serviceCity: service.city, serviceState: service.state, serviceZip: service.zip, billingSameAsService: customer.billingSameAsService !== false, billingAddress1: billing.line1, billingAddress2: billing.line2, billingCity: billing.city, billingState: billing.state, billingZip: billing.zip })
+  const [draft, setDraft] = useState({ ...customer, boardMember: customer.boardMember === true, paperlessBilling: customer.paperlessBilling === true || String(customer.paperlessBilling || '').trim().toLowerCase().startsWith('y'), serviceAddress1: service.line1, serviceAddress2: service.line2, serviceCity: service.city, serviceState: service.state, serviceZip: service.zip, billingSameAsService: customer.billingSameAsService !== false, billingAddress1: billing.line1, billingAddress2: billing.line2, billingCity: billing.city, billingState: billing.state, billingZip: billing.zip })
   const [locating, setLocating] = useState(false)
   const [locationMessage, setLocationMessage] = useState('')
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -732,7 +777,7 @@ function CustomerModal({ customer, onClose, onSave, onDelete }: { customer: Cust
   return <div className="modal-backdrop"><div className="modal address-modal">
     <div className="modal-head"><div><div className="eyebrow">CUSTOMER ACCOUNT</div><h2>{String(customer.id).startsWith('temp-') ? 'Add customer' : 'Edit customer'}</h2></div><button onClick={onClose}><Icon name="close" /></button></div>
     <div className="form-grid"><label>Customer name<input value={draft.name} onChange={e => set('name', e.target.value)} required /></label><label>Phone<input value={draft.phone} onChange={e => set('phone', e.target.value)} /></label><label>Email<input type="email" value={draft.email} onChange={e => set('email', e.target.value)} /></label></div>
-    <label className="same-address board-member-toggle"><input type="checkbox" checked={draft.boardMember === true} onChange={e => set('boardMember', e.target.checked)} /> Board member <span>Applies the configured base-rate discount.</span></label>
+    <label className="same-address board-member-toggle"><input type="checkbox" checked={draft.boardMember === true} onChange={e => set('boardMember', e.target.checked)} /> Board member <span>Applies the configured base-rate discount.</span></label><label className="same-address paperless-toggle"><input type="checkbox" checked={draft.paperlessBilling === true} onChange={e => set('paperlessBilling', e.target.checked)} /> Paperless billing <span>Customer opts out of paper statements.</span></label>
     <div className="address-section"><h3>Service address</h3><div className="address-grid"><label>Address 1<input value={draft.serviceAddress1 || ''} onChange={e => { set('serviceAddress1', e.target.value); setLocationMessage('') }} required /></label><label>Address 2<input value={draft.serviceAddress2 || ''} onChange={e => { set('serviceAddress2', e.target.value); setLocationMessage('') }} /></label><label>City<input value={draft.serviceCity || ''} onChange={e => { set('serviceCity', e.target.value); setLocationMessage('') }} required /></label><label>State<input value={draft.serviceState || ''} onChange={e => { set('serviceState', e.target.value); setLocationMessage('') }} required /></label><label>ZIP<input value={draft.serviceZip || ''} onChange={e => { set('serviceZip', e.target.value); setLocationMessage('') }} required /></label></div><button type="button" className="locate-button" onClick={locate} disabled={locating || !formattedAddress(draft).trim()}><Icon name="map" /> {locating ? 'Locating…' : draft.lat !== 0 ? 'Update service location' : 'Locate service address'}</button>{locationMessage && <small className="location-message">{locationMessage}</small>}</div>
     <div className="meter-notes-section"><label>Water meter notes<textarea rows={3} value={draft.meterNotes || ''} onChange={e => set('meterNotes', e.target.value)} placeholder="Describe where the meter is located, access details, or other field notes." /></label><small>Shared with administrators and meter readers.</small></div>
     <label className="same-address"><input type="checkbox" checked={sameBilling} onChange={e => set('billingSameAsService', e.target.checked)} /> Billing address is the same as service address</label>
