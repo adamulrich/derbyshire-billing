@@ -1,4 +1,4 @@
-const CACHE = 'derbyshire-water-v2';
+const CACHE = 'derbyshire-water-v3';
 self.addEventListener('install', event => {
   event.waitUntil(self.skipWaiting());
 });
