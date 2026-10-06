@@ -96,13 +96,9 @@ function paymentFromParse(object: Parse.Object): Payment {
   return { id: object.id || '', customerId: customer?.id || object.get('customerId') || '', amount: Number(object.get('amount') || 0), paymentDate: object.get('paymentDate') || today, method: object.get('method') || 'Check', reference: object.get('reference') || '', notes: object.get('notes') || '' }
 }
 
-async function saveCustomerToParse(customer: Customer): Promise<Customer> {
-  let object: Parse.Object
-  if (typeof customer.id === 'string' && !customer.id.startsWith('temp-')) {
-    object = await new Parse.Query('Customer').get(customer.id)
-  } else {
-    object = new Parse.Object('Customer')
-  }
+function customerObjectForParse(customer: Customer): Parse.Object {
+  const object = new Parse.Object('Customer')
+  if (typeof customer.id === 'string' && !customer.id.startsWith('temp-')) object.id = customer.id
   object.set('name', customer.name)
   object.set('address', formattedAddress(customer))
   object.set('serviceAddress1', addressParts(customer).line1)
@@ -143,7 +139,14 @@ async function saveCustomerToParse(customer: Customer): Promise<Customer> {
   object.set('geocodeDisplayName', customer.geocodeDisplayName || '')
   object.set('geocodedAt', customer.geocodedAt || '')
   object.set('boardMember', customer.boardMember === true)
-  return customerFromParse(await object.save())
+  return object
+}
+async function saveCustomerToParse(customer: Customer): Promise<Customer> {
+  return customerFromParse(await customerObjectForParse(customer).save())
+}
+async function saveCustomersToParse(customers: Customer[]): Promise<Customer[]> {
+  const saved = await Parse.Object.saveAll(customers.map(customerObjectForParse))
+  return saved.map(customerFromParse)
 }
 
 const money = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
@@ -356,10 +359,12 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
     if (parseReady) return []
     try { return JSON.parse(localStorage.getItem('derbyshire-users') || 'null') || initialUsers } catch { return initialUsers }
   })
+  const [usersLoaded, setUsersLoaded] = useState(!parseReady)
   const [payments, setPayments] = useState<Payment[]>(() => {
     if (parseReady) return []
     try { return JSON.parse(localStorage.getItem('derbyshire-payments') || '[]') } catch { return [] }
   })
+  const [paymentsLoaded, setPaymentsLoaded] = useState(!parseReady)
 
   useEffect(() => { if (!parseReady) localStorage.setItem('derbyshire-customers', JSON.stringify(customers)) }, [customers, parseReady])
   useEffect(() => { if (!parseReady) localStorage.setItem('derbyshire-cycles', JSON.stringify(cycles)) }, [cycles, parseReady])
@@ -381,21 +386,25 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
       new Parse.Query('Customer').ascending('route').limit(1000).find(),
       new Parse.Query('ReadingCycle').descending('startDate').limit(100).find(),
       new Parse.Query('RateSchedule').descending('effectiveDate').first(),
-      !isMeterReader ? Parse.Cloud.run('adminListUsers') as Promise<UserAccount[]> : Promise.resolve([]),
-      !isMeterReader ? (Parse.Cloud.run('adminListPayments').catch(() => []) as Promise<Payment[]>) : Promise.resolve([]),
     ])
-      .then(([customerObjects, cycleObjects, rateObject, userObjects, paymentObjects]) => {
+      .then(([customerObjects, cycleObjects, rateObject]) => {
         setCustomers(customerObjects.map(customerFromParse))
         const loadedCycles = cycleObjects.map(cycleFromParse)
         setCycles(loadedCycles)
         setActiveCycleId(loadedCycles.find(cycle => cycle.status === 'open')?.id || loadedCycles[0]?.id || '')
         if (rateObject) setRate(rateFromParse(rateObject))
-        setUsers(userObjects)
-        setPayments(paymentObjects as Payment[])
       })
       .catch(error => setAuthError(error instanceof Error ? error.message : 'Could not load customer data.'))
       .finally(() => setDataLoading(false))
   }, [parseReady, authUser])
+  useEffect(() => {
+    if (!parseReady || !authUser || authUser.get('role') === 'meter-reader' || view !== 'users' || usersLoaded) return
+    Parse.Cloud.run('adminListUsers').then(result => setUsers(result as UserAccount[])).catch(error => setToast(error instanceof Error ? error.message : 'Could not load users')).finally(() => setUsersLoaded(true))
+  }, [parseReady, authUser, view, usersLoaded])
+  useEffect(() => {
+    if (!parseReady || !authUser || authUser.get('role') === 'meter-reader' || view !== 'accounts' || paymentsLoaded) return
+    Parse.Cloud.run('adminListPayments').then(result => setPayments(result as Payment[])).catch(error => setToast(error instanceof Error ? error.message : 'Could not load payments')).finally(() => setPaymentsLoaded(true))
+  }, [parseReady, authUser, view, paymentsLoaded])
 
   const unread = customers.filter(c => c.current === null).length
   const readCount = customers.length - unread
@@ -444,7 +453,8 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
       let cycle: ReadingCycle
       if (parseReady) {
         const openCycles = await new Parse.Query('ReadingCycle').equalTo('status', 'open').find()
-        await Promise.all(openCycles.map(object => { object.set('status', 'closed'); return object.save() }))
+        openCycles.forEach(object => object.set('status', 'closed'))
+        if (openCycles.length) await Parse.Object.saveAll(openCycles)
         const object = new Parse.Object('ReadingCycle')
         object.set('name', name)
         object.set('startDate', startDate)
@@ -456,8 +466,8 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
         cycle = { id: `cycle-${Date.now()}`, name, startDate, dueDate, months, status: 'open' }
       }
       const resetCustomers = customers.map(customer => ({ ...customer, previous: customer.current ?? customer.previous, current: null, lastRead: null }))
-      if (parseReady) await Promise.all(resetCustomers.map(saveCustomerToParse))
-      setCustomers(resetCustomers)
+      const savedCustomers = parseReady ? await saveCustomersToParse(resetCustomers) : resetCustomers
+      setCustomers(savedCustomers)
       setCycles(items => [cycle, ...items.map(item => item.status === 'open' ? { ...item, status: 'closed' as const } : item)])
       setActiveCycleId(cycle.id)
       setToast(`New reading checkpoint created: ${name}`)
@@ -498,8 +508,8 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
   }
   const saveRouteOrder = async (ordered: Customer[]) => {
     const updated = ordered.map((customer, index) => ({ ...customer, route: index + 1 }))
-    setCustomers(updated)
-    if (parseReady) await Promise.all(updated.map(saveCustomerToParse))
+    const saved = parseReady ? await saveCustomersToParse(updated) : updated
+    setCustomers(saved)
     setToast('Reading route updated')
   }
   const moveRoute = async (id: string | number, direction: -1 | 1) => {
@@ -584,7 +594,7 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
     catch (error) { setAuthError(error instanceof Error ? error.message : 'Login failed. Check the username and password.') }
     finally { setAuthLoading(false) }
   }
-  const logOut = async () => { await Parse.User.logOut(); setAuthUser(null); setCustomers([]); setView('dashboard') }
+  const logOut = async () => { await Parse.User.logOut(); setAuthUser(null); setCustomers([]); setUsersLoaded(false); setPaymentsLoaded(false); setView('dashboard') }
 
   if (parseReady && !authChecked) return <LoadingScreen />
   if (parseReady && !authUser) return <LoginScreen onLogin={logIn} loading={authLoading} error={authError} />
@@ -603,7 +613,7 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
     </aside>
     {mobileMenuOpen && <button className="mobile-nav-backdrop" aria-label="Close menu" onClick={() => setMobileMenuOpen(false)} />}
     <main className="main"><header className="topbar"><button className="mobile-menu" aria-label="Open menu" title="Open menu" onClick={() => setMobileMenuOpen(true)}><Icon name="menu" /></button><div className="crumb">{activeCycle?.name || 'No active checkpoint'} <span>·</span> {activeCycle ? `Due ${activeCycle.dueDate}` : 'Create one to begin'}</div><div className="top-actions"><button className="help" aria-label="Help" title="Help">?</button><button className="role-pill" onClick={() => parseReady ? logOut() : setRole(role === 'meter-reader' ? 'administrator' : 'meter-reader')}>{parseReady ? 'Sign out' : role === 'meter-reader' ? 'Meter reader' : 'Administrator'} <span>{parseReady ? '↪' : '⌄'}</span></button></div></header>
-      <div className="content">{dataLoading && <div className="data-loading"><span className="loading-dot" /> Loading customer data from Back4App…</div>}{view === 'dashboard' && <Dashboard customers={customers} unread={unread} readCount={readCount} navigate={navigate} rate={rate} activeCycle={activeCycle} userName={displayName} />}{view === 'readings' && <Readings customers={customers} activeCycle={activeCycle} onSave={saveReading} onSavePrevious={savePreviousReading} onCreateCycle={createCycle} onMoveLocation={moveCustomerLocation} />}{view === 'route' && <RoutePlan customers={customers} onMove={moveRoute} onReorder={reorderRoute} onMenu={() => setMobileMenuOpen(true)} onMoveLocation={moveCustomerLocation} />}{view === 'customers' && <Customers customers={customers} onEdit={setEditing} onAdd={() => setEditing({ id: `temp-${Date.now()}`, name: '', address: '', phone: '', email: '', previous: 0, current: null, lastRead: null, route: customers.length + 1, lat: 0, lng: 0 })} />}{view === 'billing' && <Billing customers={customers} activeCycle={activeCycle} rate={rate} canManage={role === 'administrator'} onExportBackup={exportDatabaseBackup} onSaveRate={async nextRate => { try { let object: Parse.Object; if (parseReady && typeof nextRate.id === 'string' && nextRate.id !== 'default-rate') object = await new Parse.Query('RateSchedule').get(nextRate.id); else object = new Parse.Object('RateSchedule'); Object.entries(nextRate).forEach(([key, value]) => { if (key !== 'id') object.set(key, value) }); const saved = parseReady ? rateFromParse(await object.save()) : nextRate; setRate(saved); setToast(parseReady ? 'Rate schedule saved to Back4App' : 'Rate schedule updated') } catch (error) { setToast(error instanceof Error ? error.message : 'Could not save rates') } }} onUpdateCycle={async nextCycle => { if (parseReady && typeof nextCycle.id === 'string' && nextCycle.id !== 'demo-cycle') { const object = await new Parse.Query('ReadingCycle').get(nextCycle.id); object.set('name', nextCycle.name); object.set('startDate', nextCycle.startDate); object.set('dueDate', nextCycle.dueDate); object.set('months', nextCycle.months); await object.save() } setCycles(items => items.map(item => item.id === nextCycle.id ? nextCycle : item)); setToast('Billing period updated') }} />}{view === 'accounts' && role === 'administrator' && <Accounts customers={customers} rate={rate} activeCycle={activeCycle} payments={payments} onRecordPayment={recordPayment} onSetPriorBalance={setPriorBalance} />}{view === 'users' && role === 'administrator' && <Users users={users} onAdd={addUser} onToggle={toggleUser} />}</div>
+      <div className="content">{dataLoading && <div className="data-loading"><span className="loading-dot" /> Loading customer data from Back4App…</div>}{view === 'dashboard' && <Dashboard customers={customers} unread={unread} readCount={readCount} navigate={navigate} rate={rate} activeCycle={activeCycle} userName={displayName} />}{view === 'readings' && <Readings customers={customers} activeCycle={activeCycle} onSave={saveReading} onSavePrevious={savePreviousReading} onCreateCycle={createCycle} onMoveLocation={moveCustomerLocation} />}{view === 'route' && <RoutePlan customers={customers} onMove={moveRoute} onReorder={reorderRoute} onMenu={() => setMobileMenuOpen(true)} onMoveLocation={moveCustomerLocation} />}{view === 'customers' && <Customers customers={customers} onEdit={setEditing} onAdd={() => setEditing({ id: `temp-${Date.now()}`, name: '', address: '', phone: '', email: '', previous: 0, current: null, lastRead: null, route: customers.length + 1, lat: 0, lng: 0 })} />}{view === 'billing' && <Billing customers={customers} activeCycle={activeCycle} rate={rate} payments={payments} canManage={role === 'administrator'} onExportBackup={exportDatabaseBackup} onSaveRate={async nextRate => { try { let object: Parse.Object; if (parseReady && typeof nextRate.id === 'string' && nextRate.id !== 'default-rate') object = await new Parse.Query('RateSchedule').get(nextRate.id); else object = new Parse.Object('RateSchedule'); Object.entries(nextRate).forEach(([key, value]) => { if (key !== 'id') object.set(key, value) }); const saved = parseReady ? rateFromParse(await object.save()) : nextRate; setRate(saved); setToast(parseReady ? 'Rate schedule saved to Back4App' : 'Rate schedule updated') } catch (error) { setToast(error instanceof Error ? error.message : 'Could not save rates') } }} onUpdateCycle={async nextCycle => { if (parseReady && typeof nextCycle.id === 'string' && nextCycle.id !== 'demo-cycle') { const object = await new Parse.Query('ReadingCycle').get(nextCycle.id); object.set('name', nextCycle.name); object.set('startDate', nextCycle.startDate); object.set('dueDate', nextCycle.dueDate); object.set('months', nextCycle.months); await object.save() } setCycles(items => items.map(item => item.id === nextCycle.id ? nextCycle : item)); setToast('Billing period updated') }} />}{view === 'accounts' && role === 'administrator' && <Accounts customers={customers} rate={rate} activeCycle={activeCycle} payments={payments} onRecordPayment={recordPayment} onSetPriorBalance={setPriorBalance} />}{view === 'users' && role === 'administrator' && <Users users={users} onAdd={addUser} onToggle={toggleUser} />}</div>
     </main>
     {editing && <CustomerModal customer={editing} onClose={() => setEditing(null)} onSave={updateCustomer} onDelete={deleteCustomer} />}
     {confirmReading && <ConfirmModal customer={confirmReading.customer} value={confirmReading.value} onCancel={() => setConfirmReading(null)} onConfirm={() => saveReading(confirmReading.customer.id, confirmReading.value, true)} />}
@@ -676,11 +686,11 @@ function Accounts({ customers, rate, activeCycle, payments, onRecordPayment, onS
 }
 function PriorBalanceModal({ customer, onClose, onSave }: { customer: Customer; onClose: () => void; onSave: (amount: number) => Promise<void> }) { const [amount, setAmount] = useState(String(customer.priorBalance || 0)); return <div className="modal-backdrop"><form className="modal" onSubmit={async e => { e.preventDefault(); const value = Number(amount); if (!Number.isFinite(value)) return; await onSave(roundToCents(value)) }}><div className="modal-head"><div><div className="eyebrow">ACCOUNTING</div><h2>Set prior balance</h2><p className="modal-intro">Opening balance carried into the new payment process for {customer.name}.</p></div><button type="button" onClick={onClose}><Icon name="close" /></button></div><label>Prior balance or credit<input autoFocus type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} required /></label><p className="modal-intro">Positive values are amounts due. Negative values are customer credits.</p><div className="modal-foot"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button type="submit" className="primary">Save prior balance</button></div></form></div> }
 function PaymentModal({ customer, onClose, onSave }: { customer: Customer; onClose: () => void; onSave: (payment: Omit<Payment, 'id'>) => Promise<void> }) { const [amount, setAmount] = useState(''); const [paymentDate, setPaymentDate] = useState(today); const [method, setMethod] = useState('Check'); const [reference, setReference] = useState(''); const [notes, setNotes] = useState(''); return <div className="modal-backdrop"><form className="modal" onSubmit={async e => { e.preventDefault(); const value = Number(amount); if (!Number.isFinite(value) || value <= 0) return; await onSave({ customerId: customer.id, amount: roundToCents(value), paymentDate, method, reference: reference.trim(), notes: notes.trim() }) }}><div className="modal-head"><div><div className="eyebrow">ACCOUNTING</div><h2>Record payment</h2><p className="modal-intro">{customer.name} · {formattedAddress(customer, true)}</p></div><button type="button" onClick={onClose}><Icon name="close" /></button></div><div className="form-grid"><label>Amount<input autoFocus type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} required /></label><label>Payment date<input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} required /></label><label>Method<select value={method} onChange={e => setMethod(e.target.value)}><option>Check</option><option>Cash</option><option>ACH</option><option>Card</option><option>Other</option></select></label><label>Reference<input value={reference} onChange={e => setReference(e.target.value)} placeholder="Check number or confirmation" /></label></div><label className="wide-field">Notes<textarea rows={3} value={notes} onChange={e => setNotes(e.target.value)} /></label><div className="modal-foot"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button type="submit" className="primary" disabled={!amount || Number(amount) <= 0}>Save payment</button></div></form></div> }
-function Billing({ customers, activeCycle, rate, canManage, onExportBackup, onSaveRate, onUpdateCycle }: { customers: Customer[]; activeCycle: ReadingCycle | null; rate: RateSchedule; canManage: boolean; onExportBackup: () => Promise<void>; onSaveRate: (rate: RateSchedule) => Promise<void>; onUpdateCycle: (cycle: ReadingCycle) => Promise<void> }) {
+function Billing({ customers, activeCycle, rate, payments, canManage, onExportBackup, onSaveRate, onUpdateCycle }: { customers: Customer[]; activeCycle: ReadingCycle | null; rate: RateSchedule; payments: Payment[]; canManage: boolean; onExportBackup: () => Promise<void>; onSaveRate: (rate: RateSchedule) => Promise<void>; onUpdateCycle: (cycle: ReadingCycle) => Promise<void> }) {
   const period = activeCycle ? `${activeCycle.startDate} – ${activeCycle.dueDate}` : 'No active checkpoint'
   const months = activeCycle?.months || 4
   const rows = customers.filter(c => c.current !== null).sort((a, b) => lastNameForSort(a.name).localeCompare(lastNameForSort(b.name), 'en', { sensitivity: 'base' }) || a.route - b.route)
-  const total = rows.reduce((sum, c) => sum + billFor(c, rate, months).total, 0)
+  const total = rows.reduce((sum, c) => { const paid = payments.filter(payment => String(payment.customerId) === String(c.id)).reduce((paymentSum, payment) => paymentSum + payment.amount, 0); return sum + billFor(c, rate, months).total + Number(c.priorBalance || 0) - paid }, 0)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const exportCsv = () => {
     const header = 'Customer,Service address,Billing address,Invoice period,Item,Description,Quantity,Rate,Amount'
@@ -688,7 +698,10 @@ function Billing({ customers, activeCycle, rate, canManage, onExportBackup, onSa
       const b = billFor(c, rate, months)
       const service = formattedAddress(c)
       const billing = formattedAddress(c, true)
+      const paid = roundToCents(payments.filter(payment => String(payment.customerId) === String(c.id)).reduce((sum, payment) => sum + payment.amount, 0))
+      const unpaidBalance = roundToCents(Number(c.priorBalance || 0) - paid)
       return [
+        [c.name, service, billing, period, 'BALANCE-FORWARD', 'Unpaid balance or credit carried forward', 1, unpaidBalance, unpaidBalance],
         [c.name, service, billing, period, 'WATER-BASE', `Base charge (includes first ${formatNumber(rate.included)} CF)`, 1, rate.base, rate.base],
         [c.name, service, billing, period, 'MAINTENANCE', `Maintenance surcharge (${months} months)`, months, rate.maintenanceMonthly, b.maintenance],
         ...(b.boardMemberDiscount > 0 ? [[c.name, service, billing, period, 'BOARD-DISCOUNT', 'Board member base-rate discount', 1, -rate.boardMemberDiscount, -b.boardMemberDiscount]] : []),
@@ -708,8 +721,8 @@ function Billing({ customers, activeCycle, rate, canManage, onExportBackup, onSa
     <PageTitle eyebrow="ADMINISTRATION" title="Billing export" description="Review line items, then download a QuickBooks-ready CSV." action={<div className="billing-actions">{canManage && <button className="secondary backup-button" onClick={onExportBackup}><Icon name="download" /> Export database backup</button>}<button className="primary" onClick={exportCsv}><Icon name="download" /> Download CSV</button></div>} />
     <div className="billing-controls"><label>Billing period<input value={period} readOnly /></label><div className="billing-summary"><span>{rows.length} invoices ready</span><strong>{money(total)}</strong><small>estimated total</small></div></div>
     <div className="rate-banner"><div className="rate-badge">$</div><div><strong>Current rate schedule</strong><span>Base {money(rate.base)} / cycle · Includes first {formatNumber(rate.included)} CF · Maintenance {money(rate.maintenanceMonthly)} / month · Board member discount {money(rate.boardMemberDiscount)} / cycle · Usage billed per 100 CF</span></div>{canManage && <button onClick={() => setSettingsOpen(true)}>Manage rates & period <Icon name="arrow" /></button>}</div>
-    <div className="panel billing-table"><div className="table-head"><span>Customer</span><span>Usage (CF)</span><span>Line-item breakdown</span><span>Total</span></div>{rows.map(c => { const b = billFor(c, rate, months); return <div className="billing-row" key={c.id}><div><strong>{c.name}</strong><span>{formattedAddress(c, true)}</span>{c.boardMember && <span className="board-member-label">Board member</span>}</div><div><strong>{formatNumber(b.usage)} CF</strong><span>Current {formatNumber(c.current!)} CF</span></div><div className="line-items"><span>Base <b>{money(rate.base)}</b></span><span>Maintenance ({months} mo) <b>{money(b.maintenance)}</b></span>{b.boardMemberDiscount > 0 && <span>Board member discount <b>{money(-b.boardMemberDiscount)}</b></span>}{b.tierOneAmount > 0 && <span>Tier 1 · {formatNumber(b.tierOneUnits)} CF <b>{money(b.tierOneAmount)}</b></span>}{b.tierTwoAmount > 0 && <span>Tier 2 · {formatNumber(b.tierTwoUnits)} CF <b>{money(b.tierTwoAmount)}</b></span>}</div><strong className="bill-total">{money(b.total)}</strong></div>})}</div>
-    <p className="billing-note">Meter usage is measured in CF. Partial 100-CF usage is prorated, with charges rounded to the nearest cent. Board member discounts apply to the base charge per billing period. Billing period and rates are editable by administrators.</p>
+    <div className="panel billing-table"><div className="table-head"><span>Customer</span><span>Usage (CF)</span><span>Line-item breakdown</span><span>Total</span></div>{rows.map(c => { const b = billFor(c, rate, months); const paid = payments.filter(payment => String(payment.customerId) === String(c.id)).reduce((sum, payment) => sum + payment.amount, 0); const unpaidBalance = roundToCents(Number(c.priorBalance || 0) - paid); return <div className="billing-row" key={c.id}><div><strong>{c.name}</strong><span>{formattedAddress(c, true)}</span>{c.boardMember && <span className="board-member-label">Board member</span>}</div><div><strong>{formatNumber(b.usage)} CF</strong><span>Current {formatNumber(c.current!)} CF</span></div><div className="line-items"><span>Unpaid balance carried forward <b>{money(unpaidBalance)}</b></span><span>Base <b>{money(rate.base)}</b></span><span>Maintenance ({months} mo) <b>{money(b.maintenance)}</b></span>{b.boardMemberDiscount > 0 && <span>Board member discount <b>{money(-b.boardMemberDiscount)}</b></span>}{b.tierOneAmount > 0 && <span>Tier 1 · {formatNumber(b.tierOneUnits)} CF <b>{money(b.tierOneAmount)}</b></span>}{b.tierTwoAmount > 0 && <span>Tier 2 · {formatNumber(b.tierTwoUnits)} CF <b>{money(b.tierTwoAmount)}</b></span>}</div><strong className="bill-total">{money(b.total + unpaidBalance)}</strong></div>})}</div>
+    <p className="billing-note">Meter usage is measured in CF. Partial 100-CF usage is prorated, with charges rounded to the nearest cent. Unpaid balance carried forward equals the prior account balance less recorded payments. Board member discounts apply to the base charge per billing period. Billing period and rates are editable by administrators.</p>
     {settingsOpen && <BillingSettingsModal rate={rate} cycle={activeCycle} onClose={() => setSettingsOpen(false)} onSaveRate={onSaveRate} onUpdateCycle={onUpdateCycle} />}
   </>
 }
