@@ -119,3 +119,25 @@ Parse.Cloud.define('adminRecordPayment', async request => {
   await payment.save(null, { useMasterKey: true })
   return paymentPayload(payment)
 })
+
+Parse.Cloud.define('adminExportBackup', async request => {
+  administrator(request)
+  const load = async (className, configure) => {
+    const query = new Parse.Query(className)
+    if (configure) configure(query)
+    query.limit(10000)
+    const objects = await query.find({ useMasterKey: true })
+    return objects.map(object => object.toJSON())
+  }
+  const [customers, cycles, readings, rates, payments] = await Promise.all([
+    load('Customer', query => query.ascending('route')),
+    load('ReadingCycle', query => query.descending('startDate')),
+    load('MeterReading', query => query.include('customer').include('cycle').include('reader').descending('readAt')),
+    load('RateSchedule', query => query.descending('effectiveDate')),
+    load('Payment', query => query.include('customer').include('enteredBy').descending('paymentDate')),
+  ])
+  return {
+    exportedAt: new Date().toISOString(),
+    collections: { Customer: customers, ReadingCycle: cycles, MeterReading: readings, RateSchedule: rates, Payment: payments },
+  }
+})
