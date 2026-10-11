@@ -3,7 +3,7 @@ import L from 'leaflet'
 import Parse from './lib/parse'
 
 type View = 'dashboard' | 'readings' | 'route' | 'customers' | 'billing' | 'accounts' | 'users'
-type Role = 'meter-reader' | 'administrator'
+type Role = 'meter-reader' | 'bookkeeper' | 'administrator'
 type Customer = {
   id: string | number; name: string; address: string; serviceAddress1?: string; serviceAddress2?: string; serviceCity?: string; serviceState?: string; serviceZip?: string; billingSameAsService?: boolean; billingAddress1?: string; billingAddress2?: string; billingCity?: string; billingState?: string; billingZip?: string; phone: string; email: string
   previous: number; current: number | null; lastRead: string | null; route: number; lat: number; lng: number; customerId?: string; priorBalance?: number; accountNumber?: string; partTimeFullTime?: string; meterInstalled?: string; residents?: string; ownerTenant?: string; notes?: string; meterNotes?: string; business?: string; parcelId?: string; connectionStatus?: string; phone2?: string; email2?: string; paperlessBilling?: boolean | string; geocodeSource?: string; geocodeDisplayName?: string; geocodedAt?: string; boardMember?: boolean
@@ -12,6 +12,7 @@ type UserAccount = { id: string | number; name: string; email: string; role: Rol
 type ReadingCycle = { id: string | number; name: string; startDate: string; dueDate: string; months: number; status: 'open' | 'closed' }
 type RateSchedule = { id: string | number; base: number; maintenanceMonthly: number; included: number; tierOneEnd: number; tierOne: number; tierTwo: number; boardMemberDiscount: number; effectiveDate: string }
 type Payment = { id: string | number; customerId: string | number; amount: number; paymentDate: string; method: string; reference: string; notes: string }
+type BillingOverride = { id: string | number; customerId: string | number; cycleId: string | number; amount: number; reason: string; updatedAt?: string }
 
 const RATE: RateSchedule = { id: 'default-rate', base: 265.23, maintenanceMonthly: 40, included: 4000, tierOneEnd: 8000, tierOne: 3.50, tierTwo: 3.93, boardMemberDiscount: 170, effectiveDate: '2026-09-01' }
 const initialCustomers: Customer[] = [
@@ -34,6 +35,10 @@ function addressParts(customer: Customer, billing = false) { const prefix = bill
 function formattedAddress(customer: Customer, billing = false) { const parts = addressParts(customer, billing); return [parts.line1, parts.line2, [parts.city, parts.state, parts.zip].filter(Boolean).join(', ')].filter(Boolean).join(', ') }
 function lastNameForSort(name: string) { const parts = name.replace(/[()]/g, '').trim().split(/\s+/).filter(part => part && part !== '&' && part.toLowerCase() !== 'and'); return (parts[parts.length - 1] || name).replace(/[^a-z0-9]/gi, '').toLocaleLowerCase() }
 function greeting(name: string) { const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: '2-digit', hourCycle: 'h23' }).format(new Date())); return `${hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'}, ${name}` }
+function normalizeBookkeeperId(value: unknown) { return String(value || '').trim().toLowerCase() }
+function roleLabel(role: Role) { return role === 'administrator' ? 'Administrator' : role === 'bookkeeper' ? 'Bookkeeper' : 'Meter reader' }
+function normalizeRole(value: unknown): Role { return value === 'meter-reader' || value === 'bookkeeper' ? value : 'administrator' }
+function nextDemoRole(role: Role): Role { return role === 'administrator' ? 'bookkeeper' : role === 'bookkeeper' ? 'meter-reader' : 'administrator' }
 
 function customerFromParse(object: Parse.Object): Customer {
   const legacyAddress = object.get('address') || ''
@@ -57,13 +62,13 @@ function customerFromParse(object: Parse.Object): Customer {
     email: object.get('email') || '',
     previous: Number(object.get('previous') || 0),
     current: object.get('current') === undefined || object.get('current') === null ? null : Number(object.get('current')),
-    customerId: object.get('customerId') || '',
+    customerId: normalizeBookkeeperId(object.get('customerId') || object.get('accountNumber')),
     priorBalance: Number(object.get('priorBalance') || 0),
     lastRead: object.get('lastRead') || null,
     route: Number(object.get('route') || 0),
     lat: Number(object.get('lat') || 39.25),
     lng: Number(object.get('lng') || -121.02),
-    accountNumber: object.get('accountNumber') || '',
+    accountNumber: normalizeBookkeeperId(object.get('accountNumber')),
     partTimeFullTime: object.get('partTimeFullTime') || '',
     meterInstalled: object.get('meterInstalled') || '',
     residents: object.get('residents') || '',
@@ -95,6 +100,11 @@ function paymentFromParse(object: Parse.Object): Payment {
   const customer = object.get('customer') as Parse.Object | undefined
   return { id: object.id || '', customerId: customer?.id || object.get('customerId') || '', amount: Number(object.get('amount') || 0), paymentDate: object.get('paymentDate') || today, method: object.get('method') || 'Check', reference: object.get('reference') || '', notes: object.get('notes') || '' }
 }
+function billingOverrideFromParse(object: Parse.Object): BillingOverride {
+  const customer = object.get('customer') as Parse.Object | undefined
+  const cycle = object.get('cycle') as Parse.Object | undefined
+  return { id: object.id || '', customerId: customer?.id || object.get('customerId') || '', cycleId: cycle?.id || object.get('cycleId') || '', amount: Number(object.get('amount') || 0), reason: object.get('reason') || '', updatedAt: object.updatedAt?.toISOString() }
+}
 
 function customerObjectForParse(customer: Customer): Parse.Object {
   const object = new Parse.Object('Customer')
@@ -116,13 +126,13 @@ function customerObjectForParse(customer: Customer): Parse.Object {
   object.set('email', customer.email)
   object.set('previous', customer.previous)
   object.set('current', customer.current)
-  object.set('customerId', customer.customerId || '')
+  object.set('customerId', normalizeBookkeeperId(customer.customerId || customer.accountNumber))
   object.set('priorBalance', Number(customer.priorBalance || 0))
   object.set('lastRead', customer.lastRead)
   object.set('route', customer.route)
   object.set('lat', customer.lat)
   object.set('lng', customer.lng)
-  object.set('accountNumber', customer.accountNumber || '')
+  object.set('accountNumber', normalizeBookkeeperId(customer.accountNumber || customer.customerId))
   object.set('partTimeFullTime', customer.partTimeFullTime || '')
   object.set('meterInstalled', customer.meterInstalled || '')
   object.set('residents', customer.residents || '')
@@ -153,11 +163,12 @@ const money = (n: number) => n.toLocaleString('en-US', { style: 'currency', curr
 const roundToCents = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
 const formatNumber = (n: number) => n.toLocaleString('en-US')
 const today = new Date().toISOString().slice(0, 10)
+function billingOverrideFor(overrides: BillingOverride[], customerId: string | number, cycleId: string | number | undefined) { return cycleId === undefined ? undefined : overrides.find(override => String(override.customerId) === String(customerId) && String(override.cycleId) === String(cycleId)) }
 
 async function exportCustomersXlsx(customers: Customer[]) {
   const XLSX = await import('xlsx-js-style')
   const headers = [
-    'Route', 'Customer ID', 'Account Number', 'Customer Name', 'Service Address 1', 'Service Address 2', 'Service City', 'Service State', 'Service ZIP',
+    'Route', 'Bookkeeper ID', 'Customer Name', 'Service Address 1', 'Service Address 2', 'Service City', 'Service State', 'Service ZIP',
     'Billing Address 1', 'Billing Address 2', 'Billing City', 'Billing State', 'Billing ZIP', 'Phone 1', 'Phone 2', 'Email 1', 'Email 2',
     'Parcel ID', 'Owner/Tenant', 'How Many Residents', 'Part/Full Time', 'Meter Installed', 'Connection Status', 'Notes', 'Water Meter Notes', 'Business',
     'Paperless Billing', 'Prior Balance', 'Previous Meter Reading (CF)', 'Current Meter Reading (CF)', 'Last Read', 'Latitude', 'Longitude', 'Geocoding Source', 'Geocoded Display Name', 'Geocoded Date', 'Board Member',
@@ -166,7 +177,7 @@ async function exportCustomersXlsx(customers: Customer[]) {
     const service = addressParts(customer)
     const billing = addressParts(customer, true)
     return [
-      customer.route, customer.customerId || '', customer.accountNumber || '', customer.name, service.line1, service.line2, service.city, service.state, service.zip,
+      customer.route, normalizeBookkeeperId(customer.customerId || customer.accountNumber), customer.name, service.line1, service.line2, service.city, service.state, service.zip,
       billing.line1, billing.line2, billing.city, billing.state, billing.zip, customer.phone || '', customer.phone2 || '', customer.email || '', customer.email2 || '',
       customer.parcelId || '', customer.ownerTenant || '', customer.residents || '', customer.partTimeFullTime || '', customer.meterInstalled || '', customer.connectionStatus || '', customer.notes || '', customer.meterNotes || '', customer.business || '',
       customer.paperlessBilling === true || String(customer.paperlessBilling || '').trim().toLowerCase().startsWith('y') ? 'Yes' : 'No', customer.priorBalance || 0, customer.previous, customer.current === null ? '' : customer.current, customer.lastRead || '', customer.lat || '', customer.lng || '', customer.geocodeSource || '', customer.geocodeDisplayName || '', customer.geocodedAt || '', customer.boardMember ? 'Yes' : 'No',
@@ -219,7 +230,7 @@ function Icon({ name }: { name: string }) {
     gauge: 'M4 18a8 8 0 1 1 16 0M12 10v6m0 0 4-3', map: 'M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3V6zm6-3v15m6-12v15',
     users: 'M16 20v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1m6-9a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm7-4a3 3 0 0 1 0 6m2 7v-1a4 4 0 0 0-3-3',
     receipt: 'M6 3h12v18l-3-2-3 2-3-2-3 2V3zm3 5h6m-6 4h6m-6 4h3', plus: 'M12 5v14m-7-7h14', download: 'M12 3v12m0 0 4-4m-4 4-4-4M5 21h14',
-    search: 'm20 20-4.3-4.3M10.8 17a6.2 6.2 0 1 1 0-12.4 6.2 6.2 0 0 1 0 12.4z', check: 'm5 12 4 4L19 6', alert: 'M12 3 2 21h20L12 3zm0 6v4m0 4h.01', chevron: 'm9 18 6-6-6-6', edit: 'M4 20h4L19 9l-4-4L4 16v4zm9-13 4 4', trash: 'M4 7h16m-10 4v6m4-6v6m-8-10 1 13h10l1-13M9 7V4h6v3', sort: 'M8 6h12M4 6h.01M4 12h.01M8 12h12M4 18h.01M8 18h12', lock: 'M6 10V8a6 6 0 0 1 12 0v2m-1 0H7a2 2 0 0 0-2 2v7h14v-7a2 2 0 0 0-2-2z', menu: 'M4 6h16M4 12h16M4 18h16', close: 'M6 6l12 12M18 6 6 18', arrow: 'm5 12h14m-6-6 6 6-6 6', up: 'm6 15 6-6 6 6', down: 'm6 9 6 6 6-6'
+    search: 'm20 20-4.3-4.3M10.8 17a6.2 6.2 0 1 1 0-12.4 6.2 6.2 0 0 1 0 12.4z', check: 'm5 12 4 4L19 6', alert: 'M12 3 2 21h20L12 3zm0 6v4m0 4h.01', chevron: 'm9 18 6-6-6-6', edit: 'M4 20h4L19 9l-4-4L4 16v4zm9-13 4 4', trash: 'M4 7h16m-10 4v6m4-6v6m-8-10 1 13h10l1-13M9 7V4h6v3', sort: 'M8 6h12M4 6h.01M4 12h.01M8 12h12M4 18h.01M8 18h12', lock: 'M6 10V8a6 6 0 0 1 12 0v2m-1 0H7a2 2 0 0 0-2 2v7h14v-7a2 2 0 0 1-2-2z', copy: 'M9 9h10v12H9zM5 15V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1', menu: 'M4 6h16M4 12h16M4 18h16', close: 'M6 6l12 12M18 6 6 18', arrow: 'm5 12h14m-6-6 6 6-6 6', up: 'm6 15 6-6 6 6', down: 'm6 9 6 6 6-6'
   }
   return <svg viewBox="0 0 24 24" className="icon" aria-hidden="true"><path d={paths[name] || paths.grid} /></svg>
 }
@@ -365,12 +376,18 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
     try { return JSON.parse(localStorage.getItem('derbyshire-payments') || '[]') } catch { return [] }
   })
   const [paymentsLoaded, setPaymentsLoaded] = useState(!parseReady)
+  const [billingOverrides, setBillingOverrides] = useState<BillingOverride[]>(() => {
+    if (parseReady) return []
+    try { return JSON.parse(localStorage.getItem('derbyshire-billing-overrides') || '[]') } catch { return [] }
+  })
+  const [billingOverridesLoaded, setBillingOverridesLoaded] = useState(!parseReady)
 
   useEffect(() => { if (!parseReady) localStorage.setItem('derbyshire-customers', JSON.stringify(customers)) }, [customers, parseReady])
   useEffect(() => { if (!parseReady) localStorage.setItem('derbyshire-cycles', JSON.stringify(cycles)) }, [cycles, parseReady])
   useEffect(() => { if (!parseReady) localStorage.setItem('derbyshire-rate', JSON.stringify(rate)) }, [rate, parseReady])
   useEffect(() => { if (!parseReady) localStorage.setItem('derbyshire-users', JSON.stringify(users)) }, [users, parseReady])
   useEffect(() => { if (!parseReady) localStorage.setItem('derbyshire-payments', JSON.stringify(payments)) }, [payments, parseReady])
+  useEffect(() => { if (!parseReady) localStorage.setItem('derbyshire-billing-overrides', JSON.stringify(billingOverrides)) }, [billingOverrides, parseReady])
   useEffect(() => { try { localStorage.setItem('derbyshire-view', view) } catch { /* Ignore unavailable browser storage. */ } }, [view])
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(''), 2800); return () => clearTimeout(t) } }, [toast])
   useEffect(() => {
@@ -379,8 +396,7 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
   }, [parseReady])
   useEffect(() => {
     if (!parseReady || !authUser) return
-    const isMeterReader = authUser.get('role') === 'meter-reader'
-    setRole(isMeterReader ? 'meter-reader' : 'administrator')
+    setRole(normalizeRole(authUser.get('role')))
     setDataLoading(true)
     Promise.all([
       new Parse.Query('Customer').ascending('route').limit(1000).find(),
@@ -398,13 +414,17 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
       .finally(() => setDataLoading(false))
   }, [parseReady, authUser])
   useEffect(() => {
-    if (!parseReady || !authUser || authUser.get('role') === 'meter-reader' || view !== 'users' || usersLoaded) return
+    if (!parseReady || !authUser || normalizeRole(authUser.get('role')) !== 'administrator' || view !== 'users' || usersLoaded) return
     Parse.Cloud.run('adminListUsers').then(result => setUsers(result as UserAccount[])).catch(error => setToast(error instanceof Error ? error.message : 'Could not load users')).finally(() => setUsersLoaded(true))
   }, [parseReady, authUser, view, usersLoaded])
   useEffect(() => {
-    if (!parseReady || !authUser || authUser.get('role') === 'meter-reader' || view !== 'accounts' || paymentsLoaded) return
+    if (!parseReady || !authUser || !['administrator', 'bookkeeper'].includes(normalizeRole(authUser.get('role'))) || (view !== 'accounts' && view !== 'billing') || paymentsLoaded) return
     Parse.Cloud.run('adminListPayments').then(result => setPayments(result as Payment[])).catch(error => setToast(error instanceof Error ? error.message : 'Could not load payments')).finally(() => setPaymentsLoaded(true))
   }, [parseReady, authUser, view, paymentsLoaded])
+  useEffect(() => {
+    if (!parseReady || !authUser || !activeCycleId || !['administrator', 'bookkeeper'].includes(normalizeRole(authUser.get('role'))) || (view !== 'accounts' && view !== 'billing') || billingOverridesLoaded) return
+    Parse.Cloud.run('adminListBillingOverrides', { cycleId: String(activeCycleId) }).then(result => setBillingOverrides(result as BillingOverride[])).catch(error => setToast(error instanceof Error ? error.message : 'Could not load billing overrides')).finally(() => setBillingOverridesLoaded(true))
+  }, [parseReady, authUser, view, activeCycleId, billingOverridesLoaded])
 
   const unread = customers.filter(c => c.current === null).length
   const readCount = customers.length - unread
@@ -470,6 +490,8 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
       setCustomers(savedCustomers)
       setCycles(items => [cycle, ...items.map(item => item.status === 'open' ? { ...item, status: 'closed' as const } : item)])
       setActiveCycleId(cycle.id)
+      setBillingOverrides([])
+      setBillingOverridesLoaded(!parseReady)
       setToast(`New reading checkpoint created: ${name}`)
     } catch (error) { setToast(error instanceof Error ? error.message : 'Could not create reading checkpoint') }
   }
@@ -539,6 +561,30 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
     setUsers(items => [...items, { ...user, id: Math.max(0, ...items.map(item => typeof item.id === 'number' ? item.id : 0)) + 1, active: true, passwordSetAt: today }])
     setToast('User created in demo mode')
   }
+  const updateUser = async (id: string | number, user: Omit<UserAccount, 'id' | 'active' | 'passwordSetAt'>, password: string) => {
+    if (parseReady) {
+      try {
+        const saved = await Parse.Cloud.run('adminUpdateUser', { userId: String(id), ...user, password }) as UserAccount
+        setUsers(items => items.map(item => item.id === id ? saved : item).sort((a, b) => a.email.localeCompare(b.email)))
+        setToast('User updated in Back4App')
+      } catch (error) { setToast(error instanceof Error ? error.message : 'Could not update user') }
+      return
+    }
+    setUsers(items => items.map(item => item.id === id ? { ...item, ...user, passwordSetAt: password ? today : item.passwordSetAt } : item).sort((a, b) => a.email.localeCompare(b.email)))
+    setToast('User updated in demo mode')
+  }
+  const deleteUser = async (id: string | number) => {
+    if (parseReady) {
+      try {
+        await Parse.Cloud.run('adminDeleteUser', { userId: String(id) })
+        setUsers(items => items.filter(item => item.id !== id))
+        setToast('User deleted from Back4App')
+      } catch (error) { setToast(error instanceof Error ? error.message : 'Could not delete user') }
+      return
+    }
+    setUsers(items => items.filter(item => item.id !== id))
+    setToast('User deleted in demo mode')
+  }
   const toggleUser = async (id: string | number) => {
     if (parseReady) {
       try {
@@ -562,6 +608,27 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
       setToast(parseReady ? 'Payment recorded in Back4App' : 'Payment recorded in demo mode')
     } catch (error) { setToast(error instanceof Error ? error.message : 'Could not record payment') }
   }
+  const saveBillingOverride = async (customerId: string | number, amount: number, reason: string) => {
+    if (!activeCycle || !Number.isFinite(amount) || amount < 0 || !reason.trim()) return
+    try {
+      const existing = billingOverrideFor(billingOverrides, customerId, activeCycle.id)
+      let saved: BillingOverride
+      if (parseReady) saved = await Parse.Cloud.run('adminSetBillingOverride', { customerId: String(customerId), cycleId: String(activeCycle.id), amount: roundToCents(amount), reason: reason.trim() }) as BillingOverride
+      else saved = { id: existing?.id || `override-${Date.now()}`, customerId, cycleId: activeCycle.id, amount: roundToCents(amount), reason: reason.trim(), updatedAt: new Date().toISOString() }
+      setBillingOverrides(items => [...items.filter(item => String(item.customerId) !== String(customerId) || String(item.cycleId) !== String(activeCycle.id)), saved])
+      setToast(parseReady ? 'Billing override saved in Back4App' : 'Billing override saved in demo mode')
+    } catch (error) { setToast(error instanceof Error ? error.message : 'Could not save billing override') }
+  }
+  const clearBillingOverride = async (customerId: string | number) => {
+    if (!activeCycle) return
+    const existing = billingOverrideFor(billingOverrides, customerId, activeCycle.id)
+    if (!existing) return
+    try {
+      if (parseReady) await Parse.Cloud.run('adminClearBillingOverride', { overrideId: String(existing.id) })
+      setBillingOverrides(items => items.filter(item => String(item.id) !== String(existing.id)))
+      setToast('Billing override cleared')
+    } catch (error) { setToast(error instanceof Error ? error.message : 'Could not clear billing override') }
+  }
   const setPriorBalance = async (id: string | number, amount: number) => {
     const customer = customers.find(item => String(item.id) === String(id))
     if (!customer || !Number.isFinite(amount)) return
@@ -572,11 +639,29 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
       setToast(`Prior balance saved for ${customer.name}`)
     } catch (error) { setToast(error instanceof Error ? error.message : 'Could not save prior balance') }
   }
+  const copyEmail = async (email: string) => {
+    if (!email) return
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(email)
+      else {
+        const textArea = document.createElement('textarea')
+        textArea.value = email
+        textArea.style.position = 'fixed'
+        textArea.style.opacity = '0'
+        document.body.appendChild(textArea)
+        textArea.focus()
+        textArea.select()
+        document.execCommand('copy')
+        textArea.remove()
+      }
+      setToast('Email address copied')
+    } catch { setToast('Could not copy email address') }
+  }
   const exportDatabaseBackup = async () => {
     try {
       const backup = parseReady
         ? await Parse.Cloud.run('adminExportBackup')
-        : { exportedAt: new Date().toISOString(), collections: { Customer: customers, ReadingCycle: cycles, MeterReading: [], RateSchedule: [rate], Payment: payments } }
+        : { exportedAt: new Date().toISOString(), collections: { Customer: customers, ReadingCycle: cycles, MeterReading: [], RateSchedule: [rate], Payment: payments, BillingOverride: billingOverrides } }
       const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
       const anchor = document.createElement('a')
@@ -594,7 +679,7 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
     catch (error) { setAuthError(error instanceof Error ? error.message : 'Login failed. Check the username and password.') }
     finally { setAuthLoading(false) }
   }
-  const logOut = async () => { await Parse.User.logOut(); setAuthUser(null); setCustomers([]); setUsersLoaded(false); setPaymentsLoaded(false); setView('dashboard') }
+  const logOut = async () => { await Parse.User.logOut(); setAuthUser(null); setCustomers([]); setBillingOverrides([]); setUsersLoaded(false); setPaymentsLoaded(false); setBillingOverridesLoaded(false); setView('dashboard') }
 
   if (parseReady && !authChecked) return <LoadingScreen />
   if (parseReady && !authUser) return <LoginScreen onLogin={logIn} loading={authLoading} error={authError} />
@@ -607,13 +692,13 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
       <div className="brand"><div className="brand-mark">D</div><div><strong>Derbyshire</strong><span>Water District</span></div><button className="mobile-close" onClick={() => setMobileMenuOpen(false)}><Icon name="close" /></button></div>
       <div className="workspace-label">WORKSPACE</div>
       <nav>{([
-        ['dashboard', 'grid', 'Overview'], ['readings', 'gauge', 'Read meters'], ['route', 'map', 'Route plan'], ['customers', 'users', 'Customers'], ['billing', 'receipt', 'Billing export'], ...(role === 'administrator' ? [['accounts', 'receipt', 'Balances & payments'] as [View, string, string], ['users', 'users', 'Users'] as [View, string, string]] : []),
+        ['dashboard', 'grid', 'Overview'], ['readings', 'gauge', 'Read meters'], ['route', 'map', 'Route plan'], ['customers', 'users', 'Customers'], ['billing', 'receipt', 'Billing export'], ...(role === 'administrator' || role === 'bookkeeper' ? [['accounts', 'receipt', 'Balances & payments'] as [View, string, string]] : []), ...(role === 'administrator' ? [['users', 'users', 'Users'] as [View, string, string]] : []),
       ] as [View, string, string][]).map(([key, icon, label]) => <button key={key} className={view === key ? 'nav-item active' : 'nav-item'} onClick={() => navigate(key)}><Icon name={icon} /><span>{label}</span>{key === 'readings' && unread > 0 && <em>{unread}</em>}</button>)}</nav>
-      <div className="sidebar-bottom"><div className="secure"><Icon name="lock" /><div><strong>{parseReady ? 'Parse connected' : 'Demo workspace'}</strong><span>{parseReady ? 'Back4App protected' : 'Add env.local'}</span></div></div><div className="user-card"><div className="avatar">{displayInitials}</div><div><strong>{displayName}</strong><span>{role === 'meter-reader' ? 'Meter reader' : 'Administrator'}</span></div><button className="more" title={parseReady ? 'Sign out' : 'Switch role'} onClick={() => parseReady ? logOut() : setRole(role === 'meter-reader' ? 'administrator' : 'meter-reader')}>{parseReady ? '↪' : '↕'}</button></div></div>
+      <div className="sidebar-bottom"><div className="secure"><Icon name="lock" /><div><strong>{parseReady ? 'Parse connected' : 'Demo workspace'}</strong><span>{parseReady ? 'Back4App protected' : 'Add env.local'}</span></div></div><div className="user-card"><div className="avatar">{displayInitials}</div><div><strong>{displayName}</strong><span>{roleLabel(role)}</span></div><button className="more" title={parseReady ? 'Sign out' : 'Switch role'} onClick={() => parseReady ? logOut() : setRole(nextDemoRole(role))}>{parseReady ? '↪' : '↕'}</button></div></div>
     </aside>
     {mobileMenuOpen && <button className="mobile-nav-backdrop" aria-label="Close menu" onClick={() => setMobileMenuOpen(false)} />}
-    <main className="main"><header className="topbar"><button className="mobile-menu" aria-label="Open menu" title="Open menu" onClick={() => setMobileMenuOpen(true)}><Icon name="menu" /></button><div className="crumb">{activeCycle?.name || 'No active checkpoint'} <span>·</span> {activeCycle ? `Due ${activeCycle.dueDate}` : 'Create one to begin'}</div><div className="top-actions"><button className="help" aria-label="Help" title="Help">?</button><button className="role-pill" onClick={() => parseReady ? logOut() : setRole(role === 'meter-reader' ? 'administrator' : 'meter-reader')}>{parseReady ? 'Sign out' : role === 'meter-reader' ? 'Meter reader' : 'Administrator'} <span>{parseReady ? '↪' : '⌄'}</span></button></div></header>
-      <div className="content">{dataLoading && <div className="data-loading"><span className="loading-dot" /> Loading customer data from Back4App…</div>}{view === 'dashboard' && <Dashboard customers={customers} unread={unread} readCount={readCount} navigate={navigate} rate={rate} activeCycle={activeCycle} userName={displayName} />}{view === 'readings' && <Readings customers={customers} activeCycle={activeCycle} onSave={saveReading} onSavePrevious={savePreviousReading} onCreateCycle={createCycle} onMoveLocation={moveCustomerLocation} />}{view === 'route' && <RoutePlan customers={customers} onMove={moveRoute} onReorder={reorderRoute} onMenu={() => setMobileMenuOpen(true)} onMoveLocation={moveCustomerLocation} />}{view === 'customers' && <Customers customers={customers} onEdit={setEditing} onAdd={() => setEditing({ id: `temp-${Date.now()}`, name: '', address: '', phone: '', email: '', previous: 0, current: null, lastRead: null, route: customers.length + 1, lat: 0, lng: 0 })} />}{view === 'billing' && <Billing customers={customers} activeCycle={activeCycle} rate={rate} payments={payments} canManage={role === 'administrator'} onExportBackup={exportDatabaseBackup} onSaveRate={async nextRate => { try { let object: Parse.Object; if (parseReady && typeof nextRate.id === 'string' && nextRate.id !== 'default-rate') object = await new Parse.Query('RateSchedule').get(nextRate.id); else object = new Parse.Object('RateSchedule'); Object.entries(nextRate).forEach(([key, value]) => { if (key !== 'id') object.set(key, value) }); const saved = parseReady ? rateFromParse(await object.save()) : nextRate; setRate(saved); setToast(parseReady ? 'Rate schedule saved to Back4App' : 'Rate schedule updated') } catch (error) { setToast(error instanceof Error ? error.message : 'Could not save rates') } }} onUpdateCycle={async nextCycle => { if (parseReady && typeof nextCycle.id === 'string' && nextCycle.id !== 'demo-cycle') { const object = await new Parse.Query('ReadingCycle').get(nextCycle.id); object.set('name', nextCycle.name); object.set('startDate', nextCycle.startDate); object.set('dueDate', nextCycle.dueDate); object.set('months', nextCycle.months); await object.save() } setCycles(items => items.map(item => item.id === nextCycle.id ? nextCycle : item)); setToast('Billing period updated') }} />}{view === 'accounts' && role === 'administrator' && <Accounts customers={customers} rate={rate} activeCycle={activeCycle} payments={payments} onRecordPayment={recordPayment} onSetPriorBalance={setPriorBalance} />}{view === 'users' && role === 'administrator' && <Users users={users} onAdd={addUser} onToggle={toggleUser} />}</div>
+    <main className="main"><header className="topbar"><button className="mobile-menu" aria-label="Open menu" title="Open menu" onClick={() => setMobileMenuOpen(true)}><Icon name="menu" /></button><div className="crumb">{activeCycle?.name || 'No active checkpoint'} <span>·</span> {activeCycle ? `Due ${activeCycle.dueDate}` : 'Create one to begin'}</div><div className="top-actions"><button className="help" aria-label="Help" title="Help">?</button><button className="role-pill" onClick={() => parseReady ? logOut() : setRole(nextDemoRole(role))}>{parseReady ? 'Sign out' : roleLabel(role)} <span>{parseReady ? '↪' : '⌄'}</span></button></div></header>
+      <div className="content">{dataLoading && <div className="data-loading"><span className="loading-dot" /> Loading customer data from Back4App…</div>}{view === 'dashboard' && <Dashboard customers={customers} unread={unread} readCount={readCount} navigate={navigate} rate={rate} activeCycle={activeCycle} userName={displayName} />}{view === 'readings' && <Readings customers={customers} activeCycle={activeCycle} onSave={saveReading} onSavePrevious={savePreviousReading} onCreateCycle={createCycle} onMoveLocation={moveCustomerLocation} />}{view === 'route' && <RoutePlan customers={customers} onMove={moveRoute} onReorder={reorderRoute} onMenu={() => setMobileMenuOpen(true)} onMoveLocation={moveCustomerLocation} />}{view === 'customers' && <Customers customers={customers} onEdit={setEditing} onCopyEmail={copyEmail} onAdd={() => setEditing({ id: `temp-${Date.now()}`, name: '', address: '', phone: '', phone2: '', email: '', email2: '', previous: 0, current: null, lastRead: null, route: customers.length + 1, lat: 0, lng: 0 })} />}{view === 'billing' && <Billing customers={customers} activeCycle={activeCycle} rate={rate} payments={payments} billingOverrides={billingOverrides} canManage={role === 'administrator'} canOverride={role === 'administrator' || role === 'bookkeeper'} onExportBackup={exportDatabaseBackup} onSaveRate={async nextRate => { try { let object: Parse.Object; if (parseReady && typeof nextRate.id === 'string' && nextRate.id !== 'default-rate') object = await new Parse.Query('RateSchedule').get(nextRate.id); else object = new Parse.Object('RateSchedule'); Object.entries(nextRate).forEach(([key, value]) => { if (key !== 'id') object.set(key, value) }); const saved = parseReady ? rateFromParse(await object.save()) : nextRate; setRate(saved); setToast(parseReady ? 'Rate schedule saved to Back4App' : 'Rate schedule updated') } catch (error) { setToast(error instanceof Error ? error.message : 'Could not save rates') } }} onUpdateCycle={async nextCycle => { if (parseReady && typeof nextCycle.id === 'string' && nextCycle.id !== 'demo-cycle') { const object = await new Parse.Query('ReadingCycle').get(nextCycle.id); object.set('name', nextCycle.name); object.set('startDate', nextCycle.startDate); object.set('dueDate', nextCycle.dueDate); object.set('months', nextCycle.months); await object.save() } setCycles(items => items.map(item => item.id === nextCycle.id ? nextCycle : item)); setToast('Billing period updated') }} onSetBillingOverride={saveBillingOverride} onClearBillingOverride={clearBillingOverride} />}{view === 'accounts' && (role === 'administrator' || role === 'bookkeeper') && <Accounts customers={customers} rate={rate} activeCycle={activeCycle} payments={payments} billingOverrides={billingOverrides} onRecordPayment={recordPayment} onSetPriorBalance={setPriorBalance} onSetBillingOverride={saveBillingOverride} onClearBillingOverride={clearBillingOverride} />}{view === 'users' && role === 'administrator' && <Users users={users} onAdd={addUser} onUpdate={updateUser} onDelete={deleteUser} onToggle={toggleUser} />}</div>
     </main>
     {editing && <CustomerModal customer={editing} onClose={() => setEditing(null)} onSave={updateCustomer} onDelete={deleteCustomer} />}
     {confirmReading && <ConfirmModal customer={confirmReading.customer} value={confirmReading.value} onCancel={() => setConfirmReading(null)} onConfirm={() => saveReading(confirmReading.customer.id, confirmReading.value, true)} />}
@@ -663,50 +748,81 @@ function RoutePlan({ customers, onMove, onReorder, onMenu, onMoveLocation }: { c
 
 function FullMapModal({ customers, onClose, onMenu, editable, onToggleEditable, onMoveLocation }: { customers: Customer[]; onClose: () => void; onMenu: () => void; editable: boolean; onToggleEditable: () => void; onMoveLocation: (id: string | number, lat: number, lng: number) => Promise<void> }) { const [filter, setFilter] = useState<'all' | 'read' | 'todo'>('all'); const shown = customers.filter(customer => filter === 'all' || (filter === 'read' ? customer.current !== null : customer.current === null)); return <div className="full-map-backdrop"><div className="full-map-modal"><div className="full-map-head"><button className="mobile-menu full-map-menu" aria-label="Open menu" title="Open menu" onClick={onMenu}><Icon name="menu" /></button><div><div className="eyebrow">FIELD WORK</div><h2>Full route map</h2><p>{shown.length} of {customers.length} service addresses shown</p></div><button className="full-map-close" onClick={onClose}><Icon name="close" /></button></div><div className="full-map-toolbar"><div className="filter-tabs">{(['all', 'read', 'todo'] as const).map(key => <button key={key} className={filter === key ? 'selected' : ''} onClick={() => setFilter(key)}>{key === 'all' ? 'All addresses' : key === 'read' ? 'Read' : 'Needs reading'}</button>)}</div><div className="map-key"><span><i className="dot teal" />Read</span><span><i className="dot amber" />Needs reading</span></div><label className="map-edit-toggle"><input type="checkbox" checked={editable} onChange={onToggleEditable} /> Move pins</label></div><div className="full-map-body"><RealMap customers={shown} editable={editable} onMove={onMoveLocation} /><div className="full-map-list">{shown.sort((a, b) => a.route - b.route).map(customer => <div className="full-map-item" key={customer.id}><span className="route-index">{customer.route}</span><div><strong>{formattedAddress(customer)}</strong><span>{customer.name}</span></div><span className={customer.current !== null ? 'status-done' : 'status-todo'}>{customer.current !== null ? 'Read' : 'To do'}</span></div>)}{shown.length === 0 && <div className="empty">No addresses in this filter.</div>}</div></div></div></div> }
 
-function Customers({ customers, onEdit, onAdd }: { customers: Customer[]; onEdit: (customer: Customer) => void; onAdd: () => void }) {
+function Customers({ customers, onEdit, onCopyEmail, onAdd }: { customers: Customer[]; onEdit: (customer: Customer) => void; onCopyEmail: (email: string) => Promise<void>; onAdd: () => void }) {
   const [query, setQuery] = useState('')
-  const shown = customers.filter(c => (c.name + formattedAddress(c) + formattedAddress(c, true)).toLowerCase().includes(query.toLowerCase()))
+  const [sort, setSort] = useState<{ key: 'name' | 'phone' | 'email' | 'lastRead'; direction: 'asc' | 'desc' }>({ key: 'name', direction: 'asc' })
+  const toggleSort = (key: typeof sort.key) => setSort(current => current.key === key ? { key, direction: current.direction === 'asc' ? 'desc' : 'asc' } : { key, direction: 'asc' })
+  const sortHeader = (key: typeof sort.key, label: string) => <button type="button" className={`table-sort ${sort.key === key ? 'active' : ''}`} onClick={() => toggleSort(key)}>{label}{sort.key === key && <span aria-hidden="true">{sort.direction === 'asc' ? ' ↑' : ' ↓'}</span>}</button>
+  const shown = customers.filter(c => `${c.name} ${formattedAddress(c)} ${formattedAddress(c, true)} ${c.customerId || ''} ${c.phone || ''} ${c.phone2 || ''} ${c.email || ''} ${c.email2 || ''}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => {
+    const valueFor = (customer: Customer) => sort.key === 'name' ? lastNameForSort(customer.name) : sort.key === 'lastRead' ? customer.lastRead || '' : sort.key === 'phone' ? `${customer.phone || ''} ${customer.phone2 || ''}` : `${customer.email || ''} ${customer.email2 || ''}`
+    const comparison = valueFor(a).localeCompare(valueFor(b), 'en', { sensitivity: 'base', numeric: true }) || lastNameForSort(a.name).localeCompare(lastNameForSort(b.name), 'en', { sensitivity: 'base' })
+    return sort.direction === 'asc' ? comparison : -comparison
+  })
   return <>
     <PageTitle eyebrow="ADMINISTRATION" title="Customers" description="Manage household details and account contacts." action={<button className="primary" onClick={onAdd}><Icon name="plus" /> Add customer</button>} />
     <div className="toolbar"><div className="search"><Icon name="search" /><input placeholder="Search customers or addresses" value={query} onChange={e => setQuery(e.target.value)} /></div><button className="secondary customer-export-button" onClick={() => exportCustomersXlsx(customers)}><Icon name="download" /> Export XLSX</button></div>
-    <div className="panel customer-table"><div className="table-head"><span>Customer</span><span>Contact</span><span>Last reading</span><span>Account</span><span /></div>{shown.map(c => <div className="customer-row" key={c.id}><div className="customer-name"><div className="avatar small">{c.name.split(' ').map(n => n[0]).slice(0, 2).join('')}</div><div><strong>{c.name}</strong>{c.customerId && <small className="customer-id">Customer ID: {c.customerId}</small>}<span>{formattedAddress(c)}</span><small className="billing-preview">Bill to: {formattedAddress(c, true)}</small></div></div><div className="contact"><span>{c.phone}</span><span>{c.email}</span></div><div className="last-read">{c.lastRead ? <><strong>{c.lastRead}</strong><span>{formatNumber(c.current!)} CF</span></> : <span className="muted">Not read this cycle</span>}</div><span className="account-status">Active</span><button className="edit-button" onClick={() => onEdit(c)}><Icon name="edit" /> Edit</button></div>)}</div>
+    <div className="panel customer-table"><div className="table-head"><div>{sortHeader('name', 'Customer')}</div><div>{sortHeader('phone', 'Phone')}</div><div>{sortHeader('email', 'Email')}</div><div>{sortHeader('lastRead', 'Last reading')}</div><span>Account</span><span /></div>{shown.map(c => <div className="customer-row" key={c.id}><div className="customer-name"><div className="avatar small">{c.name.split(' ').map(n => n[0]).slice(0, 2).join('')}</div><div><strong>{c.name}</strong>{c.customerId && <small className="customer-id">Bookkeeper ID: {c.customerId}</small>}<span>{formattedAddress(c)}</span><small className="billing-preview">Bill to: {formattedAddress(c, true)}</small></div></div><div className="contact phone-column"><span>{c.phone || '—'}</span>{c.phone2 && <span className="secondary-contact">{c.phone2}</span>}</div><div className="contact email-column">{c.email ? <span className="contact-value"><span>{c.email}</span><button type="button" className="copy-button" title="Copy email address" aria-label={`Copy ${c.email}`} onClick={() => onCopyEmail(c.email)}><Icon name="copy" /></button></span> : <span>—</span>}{c.email2 && <span className="contact-value secondary-contact"><span>{c.email2}</span><button type="button" className="copy-button" title="Copy email address" aria-label={`Copy ${c.email2}`} onClick={() => onCopyEmail(c.email2!)}><Icon name="copy" /></button></span>}</div><div className="last-read">{c.lastRead ? <><strong>{c.lastRead}</strong><span>{formatNumber(c.current!)} CF</span></> : <span className="muted">Not read this cycle</span>}</div><span className="account-status">Active</span><button className="edit-button" onClick={() => onEdit(c)}><Icon name="edit" /> Edit</button></div>)}</div>
     {shown.length === 0 && <div className="empty">No customer records yet. Add your first household to begin.</div>}
   </>
 }
 
 function billFor(c: Customer, rate: RateSchedule, months = 4) { const usage = c.current === null ? 0 : Math.max(0, c.current - c.previous); const tierOneUnits = Math.max(0, Math.min(usage, rate.tierOneEnd) - rate.included); const tierTwoUnits = Math.max(0, usage - rate.tierOneEnd); const tierOneAmount = roundToCents(tierOneUnits / 100 * rate.tierOne); const tierTwoAmount = roundToCents(tierTwoUnits / 100 * rate.tierTwo); const maintenance = roundToCents(rate.maintenanceMonthly * months); const boardMemberDiscount = c.boardMember === true ? rate.boardMemberDiscount : 0; return { usage, tierOneUnits, tierTwoUnits, tierOneAmount, tierTwoAmount, maintenance, boardMemberDiscount, total: roundToCents(rate.base + maintenance + tierOneAmount + tierTwoAmount - boardMemberDiscount) } }
-function Accounts({ customers, rate, activeCycle, payments, onRecordPayment, onSetPriorBalance }: { customers: Customer[]; rate: RateSchedule; activeCycle: ReadingCycle | null; payments: Payment[]; onRecordPayment: (payment: Omit<Payment, 'id'>) => Promise<void>; onSetPriorBalance: (id: string | number, amount: number) => Promise<void> }) {
+function Accounts({ customers, rate, activeCycle, payments, billingOverrides, onRecordPayment, onSetPriorBalance, onSetBillingOverride, onClearBillingOverride }: { customers: Customer[]; rate: RateSchedule; activeCycle: ReadingCycle | null; payments: Payment[]; billingOverrides: BillingOverride[]; onRecordPayment: (payment: Omit<Payment, 'id'>) => Promise<void>; onSetPriorBalance: (id: string | number, amount: number) => Promise<void>; onSetBillingOverride: (id: string | number, amount: number, reason: string) => Promise<void>; onClearBillingOverride: (id: string | number) => Promise<void> }) {
   const [query, setQuery] = useState('')
   const [paymentFor, setPaymentFor] = useState<Customer | null>(null)
   const [balanceFor, setBalanceFor] = useState<Customer | null>(null)
-  const rows = customers.map(customer => { const bill = billFor(customer, rate, activeCycle?.months || 4); const paid = payments.filter(payment => String(payment.customerId) === String(customer.id)).reduce((sum, payment) => sum + payment.amount, 0); const priorBalance = Number(customer.priorBalance || 0); return { customer, bill, paid, priorBalance, balance: roundToCents(priorBalance + bill.total - paid) } }).filter(row => `${row.customer.name} ${formattedAddress(row.customer)}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => lastNameForSort(a.customer.name).localeCompare(lastNameForSort(b.customer.name)))
+  const [overrideFor, setOverrideFor] = useState<Customer | null>(null)
+  const rows = customers.map(customer => {
+    const bill = billFor(customer, rate, activeCycle?.months || 4)
+    const override = billingOverrideFor(billingOverrides, customer.id, activeCycle?.id)
+    const currentCharge = override?.amount ?? bill.total
+    const paid = payments.filter(payment => String(payment.customerId) === String(customer.id)).reduce((sum, payment) => sum + payment.amount, 0)
+    const priorBalance = Number(customer.priorBalance || 0)
+    return { customer, bill, override, currentCharge, paid, priorBalance, balance: roundToCents(priorBalance + currentCharge - paid) }
+  }).filter(row => `${row.customer.name} ${formattedAddress(row.customer)}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => lastNameForSort(a.customer.name).localeCompare(lastNameForSort(b.customer.name)))
   const outstanding = rows.reduce((sum, row) => sum + Math.max(0, row.balance), 0)
   const received = payments.reduce((sum, payment) => sum + payment.amount, 0)
-  return <><PageTitle eyebrow="ADMINISTRATION" title="Balances & payments" description="Account balances for the Treasurer, President, Vice President, and Secretary." /><div className="stat-grid account-stats"><Stat icon="receipt" label="Outstanding balance" value={money(outstanding)} detail="prior balance plus current billing" tone="amber" /><Stat icon="check" label="Payments received" value={money(received)} detail={`${payments.length} recorded payments`} tone="teal" /><Stat icon="users" label="Accounts" value={String(customers.length)} detail="sorted by last name" tone="blue" /></div><div className="toolbar"><div className="search"><Icon name="search" /><input placeholder="Search customers" value={query} onChange={e => setQuery(e.target.value)} /></div><span className="account-period">{activeCycle?.name || 'Current billing period'}</span></div><div className="panel account-table"><div className="table-head account-table-head"><span>Customer</span><span>Prior balance</span><span>Bill</span><span>Paid</span><span>Balance</span><span /></div>{rows.map(row => <div className="account-row" key={row.customer.id}><div><strong>{row.customer.name}</strong><span>{formattedAddress(row.customer, true)}</span></div><button className="link-button" onClick={() => setBalanceFor(row.customer)}>{money(row.priorBalance)} <small>Edit</small></button><strong>{money(row.bill.total)}</strong><span>{money(row.paid)}</span><strong className={row.balance > 0 ? 'balance-due' : 'balance-paid'}>{money(row.balance)}</strong><button className="primary small-primary" onClick={() => setPaymentFor(row.customer)}>Record payment</button></div>)}{rows.length === 0 && <div className="empty">No accounts match that search.</div>}</div><div className="panel payment-history"><div className="panel-head"><div><h2>Recent payments</h2><p>Payments are saved to Back4App and included in the customer ledger.</p></div></div>{payments.slice(0, 10).map(payment => { const customer = customers.find(item => String(item.id) === String(payment.customerId)); return <div className="payment-row" key={payment.id}><div><strong>{customer?.name || 'Unknown customer'}</strong><span>{payment.paymentDate} · {payment.method}{payment.reference ? ` · ${payment.reference}` : ''}</span></div><strong>{money(payment.amount)}</strong></div>})}{payments.length === 0 && <p className="billing-note">No payments have been recorded yet.</p>}</div>{paymentFor && <PaymentModal customer={paymentFor} onClose={() => setPaymentFor(null)} onSave={async payment => { await onRecordPayment(payment); setPaymentFor(null) }} />}{balanceFor && <PriorBalanceModal customer={balanceFor} onClose={() => setBalanceFor(null)} onSave={async amount => { await onSetPriorBalance(balanceFor.id, amount); setBalanceFor(null) }} />}</>
+  const overrideBill = overrideFor ? billFor(overrideFor, rate, activeCycle?.months || 4) : null
+  const override = overrideFor ? billingOverrideFor(billingOverrides, overrideFor.id, activeCycle?.id) : undefined
+  return <><PageTitle eyebrow="ADMINISTRATION" title="Balances & payments" description="Account balances for the Treasurer, President, Vice President, and Secretary." /><div className="stat-grid account-stats"><Stat icon="receipt" label="Outstanding balance" value={money(outstanding)} detail="prior balance plus current billing" tone="amber" /><Stat icon="check" label="Payments received" value={money(received)} detail={`${payments.length} recorded payments`} tone="teal" /><Stat icon="users" label="Accounts" value={String(customers.length)} detail="sorted by last name" tone="blue" /></div><div className="toolbar"><div className="search"><Icon name="search" /><input placeholder="Search customers" value={query} onChange={e => setQuery(e.target.value)} /></div><span className="account-period">{activeCycle?.name || 'Current billing period'}</span></div><div className="panel account-table"><div className="table-head account-table-head"><span>Customer</span><span>Prior balance</span><span>Bill</span><span>Paid</span><span>Balance</span><span /></div>{rows.map(row => <div className="account-row" key={row.customer.id}><div><strong>{row.customer.name}</strong><span>{formattedAddress(row.customer, true)}</span></div><button className="link-button" onClick={() => setBalanceFor(row.customer)}>{money(row.priorBalance)} <small>Edit</small></button><div className="account-bill-cell"><button className="link-button" onClick={() => setOverrideFor(row.customer)}>{money(row.currentCharge)} <small>{row.override ? 'Edit override' : 'Override'}</small></button>{row.override && <span className="override-label" title={row.override.reason}>Override applied</span>}</div><span>{money(row.paid)}</span><strong className={row.balance > 0 ? 'balance-due' : 'balance-paid'}>{money(row.balance)}</strong><button className="primary small-primary" onClick={() => setPaymentFor(row.customer)}>Record payment</button></div>)}{rows.length === 0 && <div className="empty">No accounts match that search.</div>}</div><div className="panel payment-history"><div className="panel-head"><div><h2>Recent payments</h2><p>Payments are saved to Back4App and included in the customer ledger.</p></div></div>{payments.slice(0, 10).map(payment => { const customer = customers.find(item => String(item.id) === String(payment.customerId)); return <div className="payment-row" key={payment.id}><div><strong>{customer?.name || 'Unknown customer'}</strong><span>{payment.paymentDate} · {payment.method}{payment.reference ? ` · ${payment.reference}` : ''}</span></div><strong>{money(payment.amount)}</strong></div>})}{payments.length === 0 && <p className="billing-note">No payments have been recorded yet.</p>}</div>{paymentFor && <PaymentModal customer={paymentFor} onClose={() => setPaymentFor(null)} onSave={async payment => { await onRecordPayment(payment); setPaymentFor(null) }} />}{balanceFor && <PriorBalanceModal customer={balanceFor} onClose={() => setBalanceFor(null)} onSave={async amount => { await onSetPriorBalance(balanceFor.id, amount); setBalanceFor(null) }} />}{overrideFor && activeCycle && overrideBill && <BillingOverrideModal customer={overrideFor} cycle={activeCycle} calculatedAmount={overrideBill.total} currentOverride={override} onClose={() => setOverrideFor(null)} onSave={async (amount, reason) => { await onSetBillingOverride(overrideFor.id, amount, reason); setOverrideFor(null) }} onClear={async () => { await onClearBillingOverride(overrideFor.id); setOverrideFor(null) }} />}</>
+}
+
+function BillingOverrideModal({ customer, cycle, calculatedAmount, currentOverride, onClose, onSave, onClear }: { customer: Customer; cycle: ReadingCycle; calculatedAmount: number; currentOverride?: BillingOverride; onClose: () => void; onSave: (amount: number, reason: string) => Promise<void>; onClear: () => Promise<void> }) {
+  const [amount, setAmount] = useState(String(currentOverride?.amount ?? calculatedAmount))
+  const [reason, setReason] = useState(currentOverride?.reason || '')
+  const submit = async (event: React.FormEvent) => { event.preventDefault(); const value = Number(amount); if (!Number.isFinite(value) || value < 0 || !reason.trim()) return; await onSave(roundToCents(value), reason.trim()) }
+  return <div className="modal-backdrop"><form className="modal" onSubmit={submit}><div className="modal-head"><div><div className="eyebrow">ACCOUNTING</div><h2>{currentOverride ? 'Edit bill override' : 'Override amount due'}</h2><p className="modal-intro">{customer.name} · {cycle.name}</p></div><button type="button" onClick={onClose}><Icon name="close" /></button></div><div className="override-comparison"><div><span>Calculated bill</span><strong>{money(calculatedAmount)}</strong></div><Icon name="arrow" /><div><span>{currentOverride ? 'Override amount' : 'New bill amount'}</span><strong>{money(Number(amount) || 0)}</strong></div></div><label className="wide-field">Bill amount for this cycle<input autoFocus type="number" min="0" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} required /></label><label className="wide-field">Reason<textarea rows={3} value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. Water leak repaired; write off excess usage." required /></label><p className="modal-intro override-help">This changes the current billing charge for this cycle only. Meter readings remain unchanged, and prior balances and payments stay separate.</p><div className="modal-foot">{currentOverride && <button type="button" className="danger-button" onClick={onClear}>Clear override</button>}<span className="modal-foot-spacer" /><button type="button" className="secondary" onClick={onClose}>Cancel</button><button type="submit" className="primary" disabled={!reason.trim() || !amount || Number(amount) < 0}>Save override</button></div></form></div>
 }
 function PriorBalanceModal({ customer, onClose, onSave }: { customer: Customer; onClose: () => void; onSave: (amount: number) => Promise<void> }) { const [amount, setAmount] = useState(String(customer.priorBalance || 0)); return <div className="modal-backdrop"><form className="modal" onSubmit={async e => { e.preventDefault(); const value = Number(amount); if (!Number.isFinite(value)) return; await onSave(roundToCents(value)) }}><div className="modal-head"><div><div className="eyebrow">ACCOUNTING</div><h2>Set prior balance</h2><p className="modal-intro">Opening balance carried into the new payment process for {customer.name}.</p></div><button type="button" onClick={onClose}><Icon name="close" /></button></div><label>Prior balance or credit<input autoFocus type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} required /></label><p className="modal-intro">Positive values are amounts due. Negative values are customer credits.</p><div className="modal-foot"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button type="submit" className="primary">Save prior balance</button></div></form></div> }
 function PaymentModal({ customer, onClose, onSave }: { customer: Customer; onClose: () => void; onSave: (payment: Omit<Payment, 'id'>) => Promise<void> }) { const [amount, setAmount] = useState(''); const [paymentDate, setPaymentDate] = useState(today); const [method, setMethod] = useState('Check'); const [reference, setReference] = useState(''); const [notes, setNotes] = useState(''); return <div className="modal-backdrop"><form className="modal" onSubmit={async e => { e.preventDefault(); const value = Number(amount); if (!Number.isFinite(value) || value <= 0) return; await onSave({ customerId: customer.id, amount: roundToCents(value), paymentDate, method, reference: reference.trim(), notes: notes.trim() }) }}><div className="modal-head"><div><div className="eyebrow">ACCOUNTING</div><h2>Record payment</h2><p className="modal-intro">{customer.name} · {formattedAddress(customer, true)}</p></div><button type="button" onClick={onClose}><Icon name="close" /></button></div><div className="form-grid"><label>Amount<input autoFocus type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} required /></label><label>Payment date<input type="date" value={paymentDate} onChange={e => setPaymentDate(e.target.value)} required /></label><label>Method<select value={method} onChange={e => setMethod(e.target.value)}><option>Check</option><option>Cash</option><option>ACH</option><option>Card</option><option>Other</option></select></label><label>Reference<input value={reference} onChange={e => setReference(e.target.value)} placeholder="Check number or confirmation" /></label></div><label className="wide-field">Notes<textarea rows={3} value={notes} onChange={e => setNotes(e.target.value)} /></label><div className="modal-foot"><button type="button" className="secondary" onClick={onClose}>Cancel</button><button type="submit" className="primary" disabled={!amount || Number(amount) <= 0}>Save payment</button></div></form></div> }
-function Billing({ customers, activeCycle, rate, payments, canManage, onExportBackup, onSaveRate, onUpdateCycle }: { customers: Customer[]; activeCycle: ReadingCycle | null; rate: RateSchedule; payments: Payment[]; canManage: boolean; onExportBackup: () => Promise<void>; onSaveRate: (rate: RateSchedule) => Promise<void>; onUpdateCycle: (cycle: ReadingCycle) => Promise<void> }) {
+function Billing({ customers, activeCycle, rate, payments, billingOverrides, canManage, canOverride, onExportBackup, onSaveRate, onUpdateCycle, onSetBillingOverride, onClearBillingOverride }: { customers: Customer[]; activeCycle: ReadingCycle | null; rate: RateSchedule; payments: Payment[]; billingOverrides: BillingOverride[]; canManage: boolean; canOverride: boolean; onExportBackup: () => Promise<void>; onSaveRate: (rate: RateSchedule) => Promise<void>; onUpdateCycle: (cycle: ReadingCycle) => Promise<void>; onSetBillingOverride: (id: string | number, amount: number, reason: string) => Promise<void>; onClearBillingOverride: (id: string | number) => Promise<void> }) {
   const period = activeCycle ? `${activeCycle.startDate} – ${activeCycle.dueDate}` : 'No active checkpoint'
   const months = activeCycle?.months || 4
   const rows = customers.filter(c => c.current !== null).sort((a, b) => lastNameForSort(a.name).localeCompare(lastNameForSort(b.name), 'en', { sensitivity: 'base' }) || a.route - b.route)
-  const total = rows.reduce((sum, c) => { const paid = payments.filter(payment => String(payment.customerId) === String(c.id)).reduce((paymentSum, payment) => paymentSum + payment.amount, 0); return sum + billFor(c, rate, months).total + Number(c.priorBalance || 0) - paid }, 0)
+  const total = rows.reduce((sum, c) => { const bill = billFor(c, rate, months); const override = billingOverrideFor(billingOverrides, c.id, activeCycle?.id); const currentCharge = override?.amount ?? bill.total; const paid = payments.filter(payment => String(payment.customerId) === String(c.id)).reduce((paymentSum, payment) => paymentSum + payment.amount, 0); return sum + currentCharge + Number(c.priorBalance || 0) - paid }, 0)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [overrideCustomer, setOverrideCustomer] = useState<Customer | null>(null)
+  const selectedBill = overrideCustomer ? billFor(overrideCustomer, rate, months) : null
+  const selectedOverride = overrideCustomer ? billingOverrideFor(billingOverrides, overrideCustomer.id, activeCycle?.id) : undefined
   const exportCsv = () => {
-    const header = 'Customer,Service address,Billing address,Invoice period,Item,Description,Quantity,Rate,Amount'
+    const header = 'Bookkeeper ID,Customer,Service address,Billing address,Invoice period,Item,Description,Quantity,Rate,Amount'
     const body = rows.flatMap(c => {
       const b = billFor(c, rate, months)
+      const override = billingOverrideFor(billingOverrides, c.id, activeCycle?.id)
+      const adjustment = override ? roundToCents(override.amount - b.total) : 0
+      const bookkeeperId = normalizeBookkeeperId(c.customerId || c.accountNumber)
       const service = formattedAddress(c)
       const billing = formattedAddress(c, true)
       const paid = roundToCents(payments.filter(payment => String(payment.customerId) === String(c.id)).reduce((sum, payment) => sum + payment.amount, 0))
       const unpaidBalance = roundToCents(Number(c.priorBalance || 0) - paid)
       return [
-        [c.name, service, billing, period, 'BALANCE-FORWARD', 'Unpaid balance or credit carried forward', 1, unpaidBalance, unpaidBalance],
-        [c.name, service, billing, period, 'WATER-BASE', `Base charge (includes first ${formatNumber(rate.included)} CF)`, 1, rate.base, rate.base],
-        [c.name, service, billing, period, 'MAINTENANCE', `Maintenance surcharge (${months} months)`, months, rate.maintenanceMonthly, b.maintenance],
-        ...(b.boardMemberDiscount > 0 ? [[c.name, service, billing, period, 'BOARD-DISCOUNT', 'Board member base-rate discount', 1, -rate.boardMemberDiscount, -b.boardMemberDiscount]] : []),
-        ...(b.tierOneUnits ? [[c.name, service, billing, period, 'WATER-TIER-1', `Usage ${rate.included + 1}–${rate.tierOneEnd} CF`, roundToCents(b.tierOneUnits / 100), rate.tierOne, b.tierOneAmount]] : []),
-        ...(b.tierTwoUnits ? [[c.name, service, billing, period, 'WATER-TIER-2', `Usage ${rate.tierOneEnd + 1}+ CF`, roundToCents(b.tierTwoUnits / 100), rate.tierTwo, b.tierTwoAmount]] : []),
+        [bookkeeperId, c.name, service, billing, period, 'BALANCE-FORWARD', 'Unpaid balance or credit carried forward', 1, unpaidBalance, unpaidBalance],
+        [bookkeeperId, c.name, service, billing, period, 'WATER-BASE', `Base charge (includes first ${formatNumber(rate.included)} CF)`, 1, rate.base, rate.base],
+        [bookkeeperId, c.name, service, billing, period, 'MAINTENANCE', `Maintenance surcharge (${months} months)`, months, rate.maintenanceMonthly, b.maintenance],
+        ...(b.boardMemberDiscount > 0 ? [[bookkeeperId, c.name, service, billing, period, 'BOARD-DISCOUNT', 'Board member base-rate discount', 1, -rate.boardMemberDiscount, -b.boardMemberDiscount]] : []),
+        ...(b.tierOneUnits ? [[bookkeeperId, c.name, service, billing, period, 'WATER-TIER-1', `Usage ${rate.included + 1}–${rate.tierOneEnd} CF`, roundToCents(b.tierOneUnits / 100), rate.tierOne, b.tierOneAmount]] : []),
+        ...(b.tierTwoUnits ? [[bookkeeperId, c.name, service, billing, period, 'WATER-TIER-2', `Usage ${rate.tierOneEnd + 1}+ CF`, roundToCents(b.tierTwoUnits / 100), rate.tierTwo, b.tierTwoAmount]] : []),
+        ...(override && adjustment !== 0 ? [[bookkeeperId, c.name, service, billing, period, 'BILL-ADJUSTMENT', `Billing adjustment: ${override.reason}`, 1, adjustment, adjustment]] : []),
       ]
     }).map(row => row.map(value => `"${String(value).replaceAll('"', '""')}"`).join(','))
     const blob = new Blob([[header, ...body].join('\n')], { type: 'text/csv' })
@@ -721,28 +837,37 @@ function Billing({ customers, activeCycle, rate, payments, canManage, onExportBa
     <PageTitle eyebrow="ADMINISTRATION" title="Billing export" description="Review line items, then download a QuickBooks-ready CSV." action={<div className="billing-actions">{canManage && <button className="secondary backup-button" onClick={onExportBackup}><Icon name="download" /> Export database backup</button>}<button className="primary" onClick={exportCsv}><Icon name="download" /> Download CSV</button></div>} />
     <div className="billing-controls"><label>Billing period<input value={period} readOnly /></label><div className="billing-summary"><span>{rows.length} invoices ready</span><strong>{money(total)}</strong><small>estimated total</small></div></div>
     <div className="rate-banner"><div className="rate-badge">$</div><div><strong>Current rate schedule</strong><span>Base {money(rate.base)} / cycle · Includes first {formatNumber(rate.included)} CF · Maintenance {money(rate.maintenanceMonthly)} / month · Board member discount {money(rate.boardMemberDiscount)} / cycle · Usage billed per 100 CF</span></div>{canManage && <button onClick={() => setSettingsOpen(true)}>Manage rates & period <Icon name="arrow" /></button>}</div>
-    <div className="panel billing-table"><div className="table-head"><span>Customer</span><span>Usage (CF)</span><span>Line-item breakdown</span><span>Total</span></div>{rows.map(c => { const b = billFor(c, rate, months); const paid = payments.filter(payment => String(payment.customerId) === String(c.id)).reduce((sum, payment) => sum + payment.amount, 0); const unpaidBalance = roundToCents(Number(c.priorBalance || 0) - paid); return <div className="billing-row" key={c.id}><div><strong>{c.name}</strong><span>{formattedAddress(c, true)}</span>{c.boardMember && <span className="board-member-label">Board member</span>}</div><div><strong>{formatNumber(b.usage)} CF</strong><span>Current {formatNumber(c.current!)} CF</span></div><div className="line-items"><span>Unpaid balance carried forward <b>{money(unpaidBalance)}</b></span><span>Base <b>{money(rate.base)}</b></span><span>Maintenance ({months} mo) <b>{money(b.maintenance)}</b></span>{b.boardMemberDiscount > 0 && <span>Board member discount <b>{money(-b.boardMemberDiscount)}</b></span>}{b.tierOneAmount > 0 && <span>Tier 1 · {formatNumber(b.tierOneUnits)} CF <b>{money(b.tierOneAmount)}</b></span>}{b.tierTwoAmount > 0 && <span>Tier 2 · {formatNumber(b.tierTwoUnits)} CF <b>{money(b.tierTwoAmount)}</b></span>}</div><strong className="bill-total">{money(b.total + unpaidBalance)}</strong></div>})}</div>
-    <p className="billing-note">Meter usage is measured in CF. Partial 100-CF usage is prorated, with charges rounded to the nearest cent. Unpaid balance carried forward equals the prior account balance less recorded payments. Board member discounts apply to the base charge per billing period. Billing period and rates are editable by administrators.</p>
+    <div className="panel billing-table"><div className="table-head"><span>Customer</span><span>Usage (CF)</span><span>Line-item breakdown</span><span>Total</span></div>{rows.map(c => { const b = billFor(c, rate, months); const override = billingOverrideFor(billingOverrides, c.id, activeCycle?.id); const currentCharge = override?.amount ?? b.total; const paid = payments.filter(payment => String(payment.customerId) === String(c.id)).reduce((sum, payment) => sum + payment.amount, 0); const unpaidBalance = roundToCents(Number(c.priorBalance || 0) - paid); const adjustment = override ? roundToCents(override.amount - b.total) : 0; return <div className="billing-row" key={c.id}><div><strong>{c.name}</strong><span>{formattedAddress(c, true)}</span>{c.boardMember && <span className="board-member-label">Board member</span>}{override && <span className="override-label" title={override.reason}>Bill override applied</span>}{canOverride && activeCycle && <button className="link-button billing-override-button" onClick={() => setOverrideCustomer(c)}>{override ? 'Edit bill override' : 'Override amount'}</button>}</div><div><strong>{formatNumber(b.usage)} CF</strong><span>Current {formatNumber(c.current!)} CF</span></div><div className="line-items"><span>Unpaid balance carried forward <b>{money(unpaidBalance)}</b></span><span>Base <b>{money(rate.base)}</b></span><span>Maintenance ({months} mo) <b>{money(b.maintenance)}</b></span>{b.boardMemberDiscount > 0 && <span>Board member discount <b>{money(-b.boardMemberDiscount)}</b></span>}{b.tierOneAmount > 0 && <span>Tier 1 · {formatNumber(b.tierOneUnits)} CF <b>{money(b.tierOneAmount)}</b></span>}{b.tierTwoAmount > 0 && <span>Tier 2 · {formatNumber(b.tierTwoUnits)} CF <b>{money(b.tierTwoAmount)}</b></span>}{override && adjustment !== 0 && <span>Billing adjustment <b>{money(adjustment)}</b></span>}</div><strong className="bill-total">{money(currentCharge + unpaidBalance)}</strong></div>})}</div>
+    <p className="billing-note">Meter usage is measured in CF. Partial 100-CF usage is prorated, with charges rounded to the nearest cent. Unpaid balance carried forward equals the prior account balance less recorded payments. A bill override changes only the current billing charge and records the reason; meter readings remain unchanged. Billing period and rates are editable by administrators.</p>
     {settingsOpen && <BillingSettingsModal rate={rate} cycle={activeCycle} onClose={() => setSettingsOpen(false)} onSaveRate={onSaveRate} onUpdateCycle={onUpdateCycle} />}
+    {overrideCustomer && activeCycle && selectedBill && <BillingOverrideModal customer={overrideCustomer} cycle={activeCycle} calculatedAmount={selectedBill.total} currentOverride={selectedOverride} onClose={() => setOverrideCustomer(null)} onSave={async (amount, reason) => { await onSetBillingOverride(overrideCustomer.id, amount, reason); setOverrideCustomer(null) }} onClear={async () => { await onClearBillingOverride(overrideCustomer.id); setOverrideCustomer(null) }} />}
   </>
 }
 
-function Users({ users, onAdd, onToggle }: { users: UserAccount[]; onAdd: (user: Omit<UserAccount, 'id' | 'active' | 'passwordSetAt'>, password: string) => void; onToggle: (id: string | number) => void }) {
+function Users({ users, onAdd, onUpdate, onDelete, onToggle }: { users: UserAccount[]; onAdd: (user: Omit<UserAccount, 'id' | 'active' | 'passwordSetAt'>, password: string) => void | Promise<void>; onUpdate: (id: string | number, user: Omit<UserAccount, 'id' | 'active' | 'passwordSetAt'>, password: string) => void | Promise<void>; onDelete: (id: string | number) => void | Promise<void>; onToggle: (id: string | number) => void | Promise<void> }) {
   const [formOpen, setFormOpen] = useState(false)
+  const [editingUser, setEditingUser] = useState<UserAccount | null>(null)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [newRole, setNewRole] = useState<Role>('meter-reader')
   const [password, setPassword] = useState('')
-  const submit = (event: React.FormEvent) => {
+  const [saving, setSaving] = useState(false)
+  const openAdd = () => { setEditingUser(null); setName(''); setEmail(''); setNewRole('meter-reader'); setPassword(''); setFormOpen(true) }
+  const openEdit = (user: UserAccount) => { setEditingUser(user); setName(user.name); setEmail(user.email); setNewRole(user.role); setPassword(''); setFormOpen(true) }
+  const closeForm = () => { if (!saving) setFormOpen(false) }
+  const submit = async (event: React.FormEvent) => {
     event.preventDefault()
-    if (!name.trim() || !email.trim() || password.length < 8) return
-    onAdd({ name: name.trim(), email: email.trim(), role: newRole }, password)
-    setName(''); setEmail(''); setPassword(''); setNewRole('meter-reader'); setFormOpen(false)
+    if (!name.trim() || !email.trim() || (!editingUser && password.length < 8) || (editingUser && password.length > 0 && password.length < 8)) return
+    setSaving(true)
+    if (editingUser) await onUpdate(editingUser.id, { name: name.trim(), email: email.trim(), role: newRole }, password)
+    else await onAdd({ name: name.trim(), email: email.trim(), role: newRole }, password)
+    setSaving(false); setFormOpen(false)
   }
-  return <><PageTitle eyebrow="ADMINISTRATION" title="Users & access" description="Invite meter readers and manage administrator access." action={<button className="primary" onClick={() => setFormOpen(true)}><Icon name="plus" /> Add user</button>} />
+  const remove = async (user: UserAccount) => { if (window.confirm(`Delete ${user.name}'s login? This cannot be undone.`)) await onDelete(user.id) }
+  return <><PageTitle eyebrow="ADMINISTRATION" title="Users & access" description="Invite staff and manage administrator access." action={<button className="primary" onClick={openAdd}><Icon name="plus" /> Add user</button>} />
     <div className="access-banner"><div className="access-banner-icon"><Icon name="lock" /></div><div><strong>Authentication is managed by Parse Cloud Code</strong><span>Passwords are sent directly to a server-side Cloud Function and are never returned to this browser.</span></div></div>
-    <div className="panel users-table"><div className="table-head user-table-head"><span>User</span><span>Role</span><span>Password</span><span>Status</span><span /></div>{users.map(user => <div className="user-row" key={user.id}><div className="customer-name"><div className="avatar small">{user.name.split(' ').map(n => n[0]).slice(0, 2).join('')}</div><div><strong>{user.name}</strong><span>{user.email}</span></div></div><span className={`role-tag ${user.role}`}>{user.role === 'administrator' ? 'Administrator' : 'Meter reader'}</span><span className="password-state">Set {user.passwordSetAt}<button>Reset</button></span><button className={user.active ? 'active-state' : 'inactive-state'} onClick={() => onToggle(user.id)}>{user.active ? 'Active' : 'Disabled'}</button><button className="edit-button">⋯</button></div>)}</div>
-    {formOpen && <div className="modal-backdrop"><form className="modal" onSubmit={submit}><div className="modal-head"><div><div className="eyebrow">ACCESS MANAGEMENT</div><h2>Add a user</h2></div><button type="button" onClick={() => setFormOpen(false)}><Icon name="close" /></button></div><p className="modal-intro">Create a login for a meter reader or another administrator. Use at least 8 characters for the initial password.</p><div className="form-grid"><label>Full name<input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Taylor Morgan" required /></label><label>Email address<input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="taylor@example.com" required /></label><label>Role<select value={newRole} onChange={e => setNewRole(e.target.value as Role)}><option value="meter-reader">Meter reader</option><option value="administrator">Administrator</option></select></label><label>Initial password<input type="password" minLength={8} value={password} onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" required /></label></div><div className="modal-foot"><button type="button" className="secondary" onClick={() => setFormOpen(false)}>Cancel</button><button type="submit" className="primary" disabled={password.length < 8 || !name || !email}>Create user</button></div></form></div>}
+    <div className="panel users-table"><div className="table-head user-table-head"><span>User</span><span>Role</span><span>Password</span><span>Status</span><span>Actions</span></div>{users.map(user => <div className="user-row" key={user.id}><div className="customer-name"><div className="avatar small">{user.name.split(' ').map(n => n[0]).slice(0, 2).join('')}</div><div><strong>{user.name}</strong><span>{user.email}</span></div></div><span className={`role-tag ${user.role}`}>{roleLabel(user.role)}</span><span className="password-state">Set {user.passwordSetAt}<button type="button" onClick={() => openEdit(user)}>Reset</button></span><button className={user.active ? 'active-state' : 'inactive-state'} onClick={() => onToggle(user.id)}>{user.active ? 'Active' : 'Disabled'}</button><div className="user-actions"><button type="button" className="edit-button" onClick={() => openEdit(user)}><Icon name="edit" /> Edit</button><button type="button" className="delete-user-button" onClick={() => remove(user)}><Icon name="trash" /> Delete</button></div></div>)}</div>
+    {formOpen && <div className="modal-backdrop"><form className="modal" onSubmit={submit}><div className="modal-head"><div><div className="eyebrow">ACCESS MANAGEMENT</div><h2>{editingUser ? 'Edit user' : 'Add a user'}</h2></div><button type="button" onClick={closeForm}><Icon name="close" /></button></div><p className="modal-intro">{editingUser ? 'Update this user’s name, email, role, or set a new password.' : 'Create a login for a meter reader, bookkeeper, or administrator. Use at least 8 characters for the initial password.'}</p><div className="form-grid"><label>Full name<input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Taylor Morgan" required /></label><label>Email address<input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="taylor@example.com" required /></label><label>Role<select value={newRole} onChange={e => setNewRole(e.target.value as Role)}><option value="meter-reader">Meter reader</option><option value="bookkeeper">Bookkeeper</option><option value="administrator">Administrator</option></select></label><label>{editingUser ? 'New password (optional)' : 'Initial password'}<input type="password" minLength={editingUser ? undefined : 8} value={password} onChange={e => setPassword(e.target.value)} placeholder={editingUser ? 'Leave blank to keep current password' : 'At least 8 characters'} required={!editingUser} /></label></div><div className="modal-foot"><button type="button" className="secondary" onClick={closeForm}>Cancel</button><button type="submit" className="primary" disabled={saving || password.length < (editingUser ? 0 : 8) || (editingUser && password.length > 0 && password.length < 8) || !name || !email}>{saving ? 'Saving…' : editingUser ? 'Save changes' : 'Create user'}</button></div></form></div>}
   </>
 }
 
@@ -806,7 +931,7 @@ function CustomerModal({ customer, onClose, onSave, onDelete }: { customer: Cust
   const sameBilling = draft.billingSameAsService !== false
   return <div className="modal-backdrop"><div className="modal address-modal">
     <div className="modal-head"><div><div className="eyebrow">CUSTOMER ACCOUNT</div><h2>{String(customer.id).startsWith('temp-') ? 'Add customer' : 'Edit customer'}</h2></div><button onClick={onClose}><Icon name="close" /></button></div>
-    <div className="form-grid"><label>Customer name<input value={draft.name} onChange={e => set('name', e.target.value)} required /></label><label>Customer ID<input value={draft.customerId || ''} onChange={e => set('customerId', e.target.value)} placeholder="Bookkeeper ID" /></label><label>Phone<input value={draft.phone} onChange={e => set('phone', e.target.value)} /></label><label>Email<input type="email" value={draft.email} onChange={e => set('email', e.target.value)} /></label></div>
+    <div className="form-grid"><label>Customer name<input value={draft.name} onChange={e => set('name', e.target.value)} required /></label><label>Bookkeeper ID<input value={draft.customerId || ''} onChange={e => set('customerId', normalizeBookkeeperId(e.target.value))} placeholder="Account number from bookkeeper" /></label><label>Primary phone<input value={draft.phone} onChange={e => set('phone', e.target.value)} /></label><label>Secondary phone<input value={draft.phone2 || ''} onChange={e => set('phone2', e.target.value)} /></label><label>Primary email<input type="email" value={draft.email} onChange={e => set('email', e.target.value)} /></label><label>Secondary email<input type="email" value={draft.email2 || ''} onChange={e => set('email2', e.target.value)} /></label></div>
     <label className="same-address board-member-toggle"><input type="checkbox" checked={draft.boardMember === true} onChange={e => set('boardMember', e.target.checked)} /> Board member <span>Applies the configured base-rate discount.</span></label><label className="same-address paperless-toggle"><input type="checkbox" checked={draft.paperlessBilling === true} onChange={e => set('paperlessBilling', e.target.checked)} /> Paperless billing <span>Customer opts out of paper statements.</span></label>
     <div className="address-section"><h3>Service address</h3><div className="address-grid"><label>Address 1<input value={draft.serviceAddress1 || ''} onChange={e => { set('serviceAddress1', e.target.value); setLocationMessage('') }} required /></label><label>Address 2<input value={draft.serviceAddress2 || ''} onChange={e => { set('serviceAddress2', e.target.value); setLocationMessage('') }} /></label><label>City<input value={draft.serviceCity || ''} onChange={e => { set('serviceCity', e.target.value); setLocationMessage('') }} required /></label><label>State<input value={draft.serviceState || ''} onChange={e => { set('serviceState', e.target.value); setLocationMessage('') }} required /></label><label>ZIP<input value={draft.serviceZip || ''} onChange={e => { set('serviceZip', e.target.value); setLocationMessage('') }} required /></label></div><button type="button" className="locate-button" onClick={locate} disabled={locating || !formattedAddress(draft).trim()}><Icon name="map" /> {locating ? 'Locating…' : draft.lat !== 0 ? 'Update service location' : 'Locate service address'}</button>{locationMessage && <small className="location-message">{locationMessage}</small>}</div>
     <div className="meter-notes-section"><label>Water meter notes<textarea rows={3} value={draft.meterNotes || ''} onChange={e => set('meterNotes', e.target.value)} placeholder="Describe where the meter is located, access details, or other field notes." /></label><small>Shared with administrators and meter readers.</small></div>

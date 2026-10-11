@@ -39,6 +39,10 @@ body{font-size:15px}
 .board-member-toggle{flex-wrap:wrap}
 .board-member-toggle span{color:#60777b;font-size:11px;margin-left:4px}
 .board-member-label{color:#8a641d!important;font-size:10px!important;margin-top:4px!important;font-weight:700}
+.modal>.same-address{display:flex;align-items:center;justify-content:flex-start;gap:7px;line-height:1.4;white-space:normal}.modal>.same-address input{flex:none;width:auto;margin:0}.modal>.same-address span{display:inline;color:#60777b;font-size:11px;margin-left:4px}.modal>.board-member-toggle{flex-wrap:nowrap}
+.contact .contact-value{display:flex;align-items:center;gap:5px;width:100%;white-space:nowrap}.contact .contact-value>span:first-child{display:block;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.contact .copy-button{display:inline-grid;place-items:center;flex:none;width:20px;height:20px}.contact .copy-button .icon{display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.contact .contact-value{width:max-content;max-width:100%}
+.user-table-head,.user-row{grid-template-columns:1.45fr .8fr 1fr .55fr 145px}.user-actions{display:flex;align-items:center;gap:10px;white-space:nowrap}.user-actions .edit-button,.delete-user-button{display:flex;align-items:center;gap:4px}.delete-user-button{background:none;color:#bd665c;font-size:10px;padding:0}.delete-user-button .icon,.user-actions .edit-button .icon{width:13px}
 
 /* High-contrast meter reading controls */
 :root{--muted:#526a70;--line:#d7e3e3}
@@ -82,6 +86,13 @@ body{font-size:15px}
 .billing-actions{display:flex;align-items:center;gap:10px}.backup-button{display:flex;align-items:center;gap:7px;background:#fff;border:1px solid #2b8884;color:#176b68}.backup-button .icon{width:15px}
 @media(min-width:701px){.sidebar{position:sticky;top:0;height:100vh;align-self:flex-start;overflow-y:auto;overflow-x:hidden}}
 .customer-id{display:block;color:#5d7479;font-size:10px;margin-top:3px;line-height:1.3}
+.customer-table .table-head,.customer-table .customer-row{grid-template-columns:1.35fr .82fr 1.15fr .85fr .6fr 52px}
+.customer-table .table-sort{display:flex;align-items:center;gap:3px;padding:0;background:none;color:#526a70;font-size:inherit;font-weight:600;letter-spacing:inherit;text-align:left;text-transform:inherit;white-space:nowrap}
+.customer-table .table-sort:hover,.customer-table .table-sort.active{color:#176b68}
+.customer-table .phone-column,.customer-table .email-column{min-width:0}
+.contact-value{display:flex;align-items:center;gap:5px;min-width:0;width:100%;white-space:nowrap}.contact-value>span:first-child{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.copy-button{display:inline-grid;place-items:center;flex:none;width:20px;height:20px;padding:2px;border:0;border-radius:4px;background:transparent;color:#176b68}.copy-button:hover,.copy-button:focus-visible{background:#e3f5f2;outline:none}.copy-button .icon{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.secondary-contact{margin-top:4px}
+.account-bill-cell{display:flex;flex-direction:column;align-items:flex-start;gap:2px}.account-bill-cell .link-button{font-weight:600}.override-label{display:block!important;color:#a85d1d!important;font-size:10px!important;line-height:1.3;margin-top:2px}.billing-override-button{margin-top:2px;font-weight:600}
+.override-comparison{display:flex;align-items:center;justify-content:center;gap:20px;background:#f4f8f8;border:1px solid #e0eaea;border-radius:8px;padding:14px;margin-bottom:16px}.override-comparison>div{text-align:center}.override-comparison span,.override-comparison strong{display:block}.override-comparison span{color:#5d7479;font-size:10px}.override-comparison strong{color:#214851;font-size:18px;margin-top:4px}.override-comparison>.icon{width:16px;color:#799093}.override-help{margin-top:12px!important}
 .modal>p.modal-intro{display:block;margin:14px 0 0;line-height:1.5}
 .modal-head h2{line-height:1.18}.modal-head .modal-intro{display:block;margin:7px 0 0;line-height:1.5}.modal>label{display:block;color:#52666c;font-size:11px}.modal>label input,.modal>label select{display:block;width:100%;margin-top:6px;border:1px solid #cbdadb;border-radius:5px;padding:10px;outline:none;font-size:12px;background:#fff;color:#1d3c45}.modal>label input:focus,.modal>label select:focus{border-color:#6ebbb3;box-shadow:0 0 0 2px #e3f5f2}
 .account-table-head,.account-row{grid-template-columns:1.35fr .75fr .7fr .7fr .8fr 125px!important}.link-button{background:none;color:#176b68;font-size:12px;text-align:left;padding:0}.link-button small{display:block;color:#5d7479;font-size:10px;margin-top:3px}
