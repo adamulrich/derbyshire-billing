@@ -42,6 +42,7 @@ body{font-size:15px}
 .modal>.same-address{display:flex;align-items:center;justify-content:flex-start;gap:7px;line-height:1.4;white-space:normal}.modal>.same-address input{flex:none;width:auto;margin:0}.modal>.same-address span{display:inline;color:#60777b;font-size:11px;margin-left:4px}.modal>.board-member-toggle{flex-wrap:nowrap}
 .contact .contact-value{display:flex;align-items:center;gap:5px;width:100%;white-space:nowrap}.contact .contact-value>span:first-child{display:block;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.contact .copy-button{display:inline-grid;place-items:center;flex:none;width:20px;height:20px}.contact .copy-button .icon{display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .contact .contact-value{width:max-content;max-width:100%}
+.payment-actions{display:flex;align-items:center;gap:14px}.payment-actions .edit-button{white-space:nowrap}
 .user-table-head,.user-row{grid-template-columns:1.45fr .8fr 1fr .55fr 145px}.user-actions{display:flex;align-items:center;gap:10px;white-space:nowrap}.user-actions .edit-button,.delete-user-button{display:flex;align-items:center;gap:4px}.delete-user-button{background:none;color:#bd665c;font-size:10px;padding:0}.delete-user-button .icon,.user-actions .edit-button .icon{width:13px}
 
 /* High-contrast meter reading controls */

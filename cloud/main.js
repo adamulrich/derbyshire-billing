@@ -182,6 +182,24 @@ Parse.Cloud.define('adminRecordPayment', async request => {
   return paymentPayload(payment)
 })
 
+Parse.Cloud.define('adminUpdatePayment', async request => {
+  const staff = financialStaff(request)
+  const paymentId = String(request.params.paymentId || '')
+  const amount = Number(request.params.amount)
+  if (!paymentId || !Number.isFinite(amount) || amount <= 0) {
+    throw new Parse.Error(Parse.Error.INVALID_QUERY, 'A payment and a positive payment amount are required.')
+  }
+  const payment = await new Parse.Query('Payment').get(paymentId, { useMasterKey: true })
+  payment.set('amount', Math.round(amount * 100) / 100)
+  payment.set('paymentDate', String(request.params.paymentDate || new Date().toISOString().slice(0, 10)))
+  payment.set('method', String(request.params.method || 'Other'))
+  payment.set('reference', String(request.params.reference || ''))
+  payment.set('notes', String(request.params.notes || ''))
+  payment.set('updatedBy', staff)
+  await payment.save(null, { useMasterKey: true })
+  return paymentPayload(payment)
+})
+
 Parse.Cloud.define('adminListBillingOverrides', async request => {
   financialStaff(request)
   const cycleId = String(request.params.cycleId || '')
@@ -203,8 +221,8 @@ Parse.Cloud.define('adminSetBillingOverride', async request => {
   const cycleId = String(request.params.cycleId || '')
   const amount = Number(request.params.amount)
   const reason = String(request.params.reason || '').trim()
-  if (!customerId || !cycleId || !Number.isFinite(amount) || amount < 0 || !reason) {
-    throw new Parse.Error(Parse.Error.INVALID_QUERY, 'A customer, billing cycle, non-negative amount, and reason are required.')
+  if (!customerId || !cycleId || !Number.isFinite(amount) || !reason) {
+    throw new Parse.Error(Parse.Error.INVALID_QUERY, 'A customer, billing cycle, amount, and reason are required.')
   }
   const customer = await new Parse.Query('Customer').get(customerId, { useMasterKey: true })
   const cycle = await new Parse.Query('ReadingCycle').get(cycleId, { useMasterKey: true })
