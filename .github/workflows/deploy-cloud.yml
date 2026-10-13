@@ -1,0 +1,63 @@
+name: Deploy Back4App Cloud Code
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - cloud/main.js
+      - .github/workflows/deploy-cloud.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: back4app-cloud-code
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BACK4APP_ACCOUNT_KEY: ${{ secrets.BACK4APP_ACCOUNT_KEY }}
+      BACK4APP_APPLICATION_ID: ${{ secrets.BACK4APP_APPLICATION_ID }}
+      BACK4APP_EMAIL: ${{ secrets.BACK4APP_EMAIL }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify Back4App secrets are available
+        run: |
+          test -n "$BACK4APP_ACCOUNT_KEY"
+          test -n "$BACK4APP_APPLICATION_ID"
+          test -n "$BACK4APP_EMAIL"
+
+      - name: Install Back4App CLI
+        run: |
+          curl --fail --silent --show-error --location \
+            https://raw.githubusercontent.com/back4app/parse-cli/back4app/installer.sh \
+            | sudo bash
+
+      - name: Configure Back4App CLI
+        run: |
+          printf '%s\n' "$BACK4APP_ACCOUNT_KEY" | b4a configure accountkey
+
+      - name: Deploy cloud/main.js
+        shell: bash
+        run: |
+          deploy_dir="$(mktemp -d)"
+          trap 'rm -rf "$deploy_dir"' EXIT
+
+          mkdir -p "$deploy_dir/cloud"
+          cp cloud/main.js "$deploy_dir/cloud/main.js"
+
+          printf '%s\n' \
+            '{"project_type":1,"parse":{"jssdk":"latest"},"email":"'"$BACK4APP_EMAIL"'"}' \
+            > "$deploy_dir/.parse.project"
+          printf '%s\n' \
+            '{"applications":{"production":{"applicationId":"'"$BACK4APP_APPLICATION_ID"'"},"_default":{"link":"production"}}}' \
+            > "$deploy_dir/.parse.local"
+
+          cd "$deploy_dir"
+          b4a deploy

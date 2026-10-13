@@ -48,3 +48,13 @@ The repository includes a workflow at `.github/workflows/deploy-pages.yml`. In t
 Then set **Settings → Pages → Source** to **GitHub Actions**. Every push to `main` will build and deploy the PWA.
 
 These values are configuration for a browser application, not true secrets: Vite embeds `VITE_*` values into the public JavaScript bundle. The Parse Application ID, JavaScript key, and server URL are expected to be exposed. Never place the Parse Master Key, database credentials, or other privileged secrets in `.env.local`, GitHub Pages, or frontend code. Protect data with Parse Class-Level Permissions, ACLs, and server-side Cloud Code for privileged operations.
+
+## Automated Back4App Cloud Code deployment
+
+The repository also includes `.github/workflows/deploy-cloud.yml`. It deploys `cloud/main.js` to Back4App when that file changes on `main`, or when the workflow is started manually. Add these repository Actions secrets under **Settings → Secrets and variables → Actions**:
+
+- `BACK4APP_ACCOUNT_KEY` — an Account Key created in Back4App
+- `BACK4APP_APPLICATION_ID` — this app's Back4App Application ID
+- `BACK4APP_EMAIL` — the email address for the Back4App account that owns the app
+
+The Account Key is a privileged deployment credential. Keep it only in GitHub Secrets; it must never be committed or exposed to the browser. The workflow stages only `cloud/main.js`, so it does not publish the GitHub Pages assets to Back4App.
