@@ -52,12 +52,32 @@ jobs:
           mkdir -p "$deploy_dir/cloud"
           cp cloud/main.js "$deploy_dir/cloud/main.js"
 
-          printf '%s\n' \
-            '{"project_type":1,"parse":{"jssdk":"latest"},"email":"'"$BACK4APP_EMAIL"'"}' \
-            > "$deploy_dir/.parse.project"
-          printf '%s\n' \
-            '{"applications":{"production":{"applicationId":"'"$BACK4APP_APPLICATION_ID"'"},"_default":{"link":"production"}}}' \
-            > "$deploy_dir/.parse.local"
+          export DEPLOY_DIR="$deploy_dir"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          deploy_dir = Path(os.environ["DEPLOY_DIR"])
+          project = {
+              "project_type": 1,
+              "parse": {"jssdk": "latest"},
+              "email": os.environ["BACK4APP_EMAIL"],
+          }
+          local = {
+              "applications": {
+                  "production": {
+                      "applicationId": os.environ["BACK4APP_APPLICATION_ID"],
+                  },
+                  "_default": {"link": "production"},
+              }
+          }
+          (deploy_dir / ".parse.project").write_text(json.dumps(project), encoding="utf-8")
+          (deploy_dir / ".parse.local").write_text(json.dumps(local), encoding="utf-8")
+          PY
+
+          python3 -m json.tool "$deploy_dir/.parse.local" >/dev/null
+          python3 -m json.tool "$deploy_dir/.parse.project" >/dev/null
 
           cd "$deploy_dir"
           b4a deploy
