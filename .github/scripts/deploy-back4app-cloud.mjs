@@ -2,11 +2,17 @@ import path from 'node:path'
 import { existsSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
-const accountKey = process.env.BACK4APP_ACCOUNT_KEY
-const applicationId = process.env.BACK4APP_APPLICATION_ID
+const accountKey = process.env.BACK4APP_ACCOUNT_KEY?.trim()
+const applicationId = process.env.BACK4APP_APPLICATION_ID?.trim()
 
 if (!accountKey || !applicationId) {
   throw new Error('BACK4APP_ACCOUNT_KEY and BACK4APP_APPLICATION_ID are required.')
+}
+
+if (!/^[A-Za-z0-9]+$/.test(applicationId)) {
+  throw new Error(
+    'BACK4APP_APPLICATION_ID must contain only letters and numbers; check for pasted whitespace or punctuation.',
+  )
 }
 
 const repositoryRoot = process.cwd()
