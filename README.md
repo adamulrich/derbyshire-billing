@@ -51,10 +51,9 @@ These values are configuration for a browser application, not true secrets: Vite
 
 ## Automated Back4App Cloud Code deployment
 
-The repository also includes `.github/workflows/deploy-cloud.yml`. It deploys `cloud/main.js` to Back4App when that file changes on `main`, or when the workflow is started manually. Add these repository Actions secrets under **Settings → Secrets and variables → Actions**:
+The repository also includes `.github/workflows/deploy-cloud.yml`. It deploys `cloud/main.js` to Back4App through Back4App's MCP deployment server when that file changes on `main`, or when the workflow is started manually. Add these repository Actions secrets under **Settings → Secrets and variables → Actions**:
 
 - `BACK4APP_ACCOUNT_KEY` — an Account Key created in Back4App
 - `BACK4APP_APPLICATION_ID` — this app's Back4App Application ID
-- `BACK4APP_EMAIL` — the email address for the Back4App account that owns the app
 
-The Account Key is a privileged deployment credential. Keep it only in GitHub Secrets; it must never be committed or exposed to the browser. Back4App's CLI deploys the standard `cloud/` and `public/` folders together, so changes to either folder trigger this workflow. The workflow generates a minimal `public/index.html` in its temporary package because Back4App expects that standard project structure; it does not add that file to the GitHub Pages source.
+The Account Key is a privileged deployment credential. Keep it only in GitHub Secrets; it must never be committed or exposed to the browser. This workflow updates only Cloud Code; GitHub Pages continues to publish the frontend through `deploy-pages.yml`.

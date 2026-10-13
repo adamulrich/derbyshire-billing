@@ -5,8 +5,8 @@ on:
     branches: [main]
     paths:
       - cloud/main.js
-      - public/**
       - .github/workflows/deploy-cloud.yml
+      - .github/scripts/deploy-back4app-cloud.mjs
   workflow_dispatch:
 
 permissions:
@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: back4app-cloud-code
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -23,79 +23,30 @@ jobs:
     env:
       BACK4APP_ACCOUNT_KEY: ${{ secrets.BACK4APP_ACCOUNT_KEY }}
       BACK4APP_APPLICATION_ID: ${{ secrets.BACK4APP_APPLICATION_ID }}
-      BACK4APP_EMAIL: ${{ secrets.BACK4APP_EMAIL }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
       - name: Verify Back4App secrets are available
         run: |
           test -n "$BACK4APP_ACCOUNT_KEY"
           test -n "$BACK4APP_APPLICATION_ID"
-          test -n "$BACK4APP_EMAIL"
 
-      - name: Install Back4App CLI
+      - name: Install Back4App MCP deployment server
         run: |
-          curl --fail --silent --show-error --location \
-            https://raw.githubusercontent.com/back4app/parse-cli/back4app/installer.sh \
-            | sudo bash
+          mcp_dir="$RUNNER_TEMP/back4app-mcp"
+          npm install --prefix "$mcp_dir" --no-package-lock --ignore-scripts \
+            @back4app/mcp-server-back4app@0.1.9
+          echo "BACK4APP_MCP_SERVER_PATH=$mcp_dir/node_modules/@back4app/mcp-server-back4app/dist/index.js" >> "$GITHUB_ENV"
 
-      - name: Configure Back4App CLI
+      - name: Validate Cloud Code syntax
         run: |
-          printf '%s\n' "$BACK4APP_ACCOUNT_KEY" | b4a configure accountkey
+          node --check cloud/main.js
 
       - name: Deploy cloud/main.js
-        shell: bash
-        run: |
-          deploy_dir="$(mktemp -d)"
-          trap 'rm -rf "$deploy_dir"' EXIT
-
-          mkdir -p "$deploy_dir/cloud" "$deploy_dir/public"
-          cp cloud/main.js "$deploy_dir/cloud/main.js"
-          cp -R public/. "$deploy_dir/public/"
-
-          export DEPLOY_DIR="$deploy_dir"
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          deploy_dir = Path(os.environ["DEPLOY_DIR"])
-          project = {
-              "project_type": 1,
-              "parse": {"jssdk": ""},
-              "email": os.environ["BACK4APP_EMAIL"],
-          }
-          local = {
-              "applications": {
-                  "production": {
-                      "applicationId": os.environ["BACK4APP_APPLICATION_ID"],
-                  },
-                  "_default": {"link": "production"},
-              }
-          }
-          (deploy_dir / ".parse.project").write_text(json.dumps(project), encoding="utf-8")
-          (deploy_dir / ".parse.local").write_text(json.dumps(local), encoding="utf-8")
-          (deploy_dir / "public" / "index.html").write_text("""<!doctype html>
-          <html lang="en">
-            <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1">
-              <title>Derbyshire Water District</title>
-            </head>
-            <body>
-              <p>Derbyshire Water District Cloud Code is running.</p>
-            </body>
-          </html>
-          """, encoding="utf-8")
-          PY
-
-          python3 -m json.tool "$deploy_dir/.parse.local" >/dev/null
-          python3 -m json.tool "$deploy_dir/.parse.project" >/dev/null
-
-          cd "$deploy_dir"
-          sdk_version="$(b4a jssdk --all | sed -nE 's/^[* ]+([^[:space:]]+)$/\1/p' | head -n 1)"
-          test -n "$sdk_version"
-          b4a jssdk "$sdk_version"
-          python3 -m json.tool .parse.project >/dev/null
-          b4a deploy
+        run: node .github/scripts/deploy-back4app-cloud.mjs

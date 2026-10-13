@@ -1,0 +1,81 @@
+import path from 'node:path'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+
+const accountKey = process.env.BACK4APP_ACCOUNT_KEY
+const applicationId = process.env.BACK4APP_APPLICATION_ID
+
+if (!accountKey || !applicationId) {
+  throw new Error('BACK4APP_ACCOUNT_KEY and BACK4APP_APPLICATION_ID are required.')
+}
+
+const repositoryRoot = process.cwd()
+const cloudCodePath = path.resolve(repositoryRoot, 'cloud/main.js')
+const serverPath = process.env.BACK4APP_MCP_SERVER_PATH
+  || path.resolve(
+    repositoryRoot,
+    'node_modules/@back4app/mcp-server-back4app/dist/index.js',
+  )
+
+const childEnvironment = Object.fromEntries(
+  Object.entries(process.env).filter(([, value]) => value !== undefined),
+)
+childEnvironment.BACK4APP_ACCOUNT_KEY = accountKey
+
+const transport = new StdioClientTransport({
+  command: process.execPath,
+  args: [serverPath],
+  cwd: repositoryRoot,
+  env: childEnvironment,
+})
+
+const client = new Client(
+  {
+    name: 'derbyshire-water-github-action',
+    version: '1.0.0',
+  },
+  { capabilities: {} },
+)
+
+try {
+  await client.connect(transport)
+
+  const result = await client.callTool({
+    name: 'deploy_cloud_code_files',
+    arguments: {
+      applicationId,
+      files: [
+        {
+          path: 'main.js',
+          localPath: cloudCodePath,
+          encoding: 'utf8',
+        },
+      ],
+      description: `GitHub Actions ${process.env.GITHUB_SHA || 'manual run'}`,
+    },
+  })
+
+  if (result.isError) {
+    const errorText = result.content
+      ?.filter(content => content.type === 'text')
+      .map(content => content.text)
+      .join('\n')
+    throw new Error(errorText || 'Back4App MCP deployment failed.')
+  }
+
+  const output = result.content
+    ?.filter(content => content.type === 'text')
+    .map(content => content.text)
+    .join('\n')
+
+  if (output) console.log(output)
+  console.log('Back4App Cloud Code deployment completed.')
+} finally {
+  try {
+    await client.close()
+  } catch (error) {
+    console.error(
+      `Could not close the Back4App MCP connection cleanly: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
