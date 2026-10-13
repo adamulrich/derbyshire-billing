@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - cloud/main.js
+      - public/**
       - .github/workflows/deploy-cloud.yml
   workflow_dispatch:
 
@@ -49,8 +50,9 @@ jobs:
           deploy_dir="$(mktemp -d)"
           trap 'rm -rf "$deploy_dir"' EXIT
 
-          mkdir -p "$deploy_dir/cloud"
+          mkdir -p "$deploy_dir/cloud" "$deploy_dir/public"
           cp cloud/main.js "$deploy_dir/cloud/main.js"
+          cp -R public/. "$deploy_dir/public/"
 
           export DEPLOY_DIR="$deploy_dir"
           python3 - <<'PY'
