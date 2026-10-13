@@ -76,6 +76,18 @@ jobs:
           }
           (deploy_dir / ".parse.project").write_text(json.dumps(project), encoding="utf-8")
           (deploy_dir / ".parse.local").write_text(json.dumps(local), encoding="utf-8")
+          (deploy_dir / "public" / "index.html").write_text("""<!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <title>Derbyshire Water District</title>
+            </head>
+            <body>
+              <p>Derbyshire Water District Cloud Code is running.</p>
+            </body>
+          </html>
+          """, encoding="utf-8")
           PY
 
           python3 -m json.tool "$deploy_dir/.parse.local" >/dev/null

@@ -57,4 +57,4 @@ The repository also includes `.github/workflows/deploy-cloud.yml`. It deploys `c
 - `BACK4APP_APPLICATION_ID` — this app's Back4App Application ID
 - `BACK4APP_EMAIL` — the email address for the Back4App account that owns the app
 
-The Account Key is a privileged deployment credential. Keep it only in GitHub Secrets; it must never be committed or exposed to the browser. Back4App's CLI deploys the standard `cloud/` and `public/` folders together, so changes to either folder trigger this workflow.
+The Account Key is a privileged deployment credential. Keep it only in GitHub Secrets; it must never be committed or exposed to the browser. Back4App's CLI deploys the standard `cloud/` and `public/` folders together, so changes to either folder trigger this workflow. The workflow generates a minimal `public/index.html` in its temporary package because Back4App expects that standard project structure; it does not add that file to the GitHub Pages source.
