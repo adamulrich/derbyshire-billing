@@ -41,7 +41,8 @@ jobs:
         run: |
           mcp_dir="$RUNNER_TEMP/back4app-mcp"
           npm install --prefix "$mcp_dir" --no-package-lock --ignore-scripts \
-            @back4app/mcp-server-back4app@0.1.9
+            @back4app/mcp-server-back4app@0.1.9 \
+            @modelcontextprotocol/sdk@1.8.0
           echo "BACK4APP_MCP_SERVER_PATH=$mcp_dir/node_modules/@back4app/mcp-server-back4app/dist/index.js" >> "$GITHUB_ENV"
 
       - name: Validate Cloud Code syntax

@@ -1,6 +1,6 @@
 import path from 'node:path'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { existsSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
 
 const accountKey = process.env.BACK4APP_ACCOUNT_KEY
 const applicationId = process.env.BACK4APP_APPLICATION_ID
@@ -16,6 +16,22 @@ const serverPath = process.env.BACK4APP_MCP_SERVER_PATH
     repositoryRoot,
     'node_modules/@back4app/mcp-server-back4app/dist/index.js',
   )
+const sdkRootCandidates = [
+  path.resolve(path.dirname(serverPath), '../../../@modelcontextprotocol/sdk'),
+  path.resolve(path.dirname(serverPath), '../node_modules/@modelcontextprotocol/sdk'),
+]
+const sdkRoot = sdkRootCandidates.find(candidate => existsSync(candidate))
+
+if (!sdkRoot) {
+  throw new Error('Could not locate the Model Context Protocol SDK next to the Back4App MCP server.')
+}
+
+const { Client } = await import(
+  pathToFileURL(path.join(sdkRoot, 'dist/esm/client/index.js')).href,
+)
+const { StdioClientTransport } = await import(
+  pathToFileURL(path.join(sdkRoot, 'dist/esm/client/stdio.js')).href,
+)
 
 const childEnvironment = Object.fromEntries(
   Object.entries(process.env).filter(([, value]) => value !== undefined),
