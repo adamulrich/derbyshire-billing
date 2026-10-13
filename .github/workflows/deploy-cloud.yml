@@ -94,18 +94,8 @@ jobs:
           python3 -m json.tool "$deploy_dir/.parse.project" >/dev/null
 
           cd "$deploy_dir"
-          sdk_version="$(b4a jssdk --all | grep -Eo '[0-9]+(\.[0-9]+)+' | head -n 1)"
+          sdk_version="$(b4a jssdk --all | sed -nE 's/^[* ]+([^[:space:]]+)$/\1/p' | head -n 1)"
           test -n "$sdk_version"
-          export SDK_VERSION="$sdk_version"
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          project_path = Path(".parse.project")
-          project = json.loads(project_path.read_text(encoding="utf-8"))
-          project["parse"]["jssdk"] = os.environ["SDK_VERSION"]
-          project_path.write_text(json.dumps(project), encoding="utf-8")
-          PY
+          b4a jssdk "$sdk_version"
           python3 -m json.tool .parse.project >/dev/null
           b4a deploy
