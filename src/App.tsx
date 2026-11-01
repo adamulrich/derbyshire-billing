@@ -892,7 +892,7 @@ function Billing({ customers, activeCycle, rate, payments, billingOverrides, can
         b.tierOneAmount, b.tierTwoAmount, adjustment, totalDue,
       ]
     }).map(row => row.map(value => `"${String(value).replaceAll('"', '""')}"`).join(','))
-    const blob = new Blob([[header.join(','), ...body].join('\n')], { type: 'text/csv' })
+    const blob = new Blob([`\uFEFF${[header.join(','), ...body].join('\n')}`], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
