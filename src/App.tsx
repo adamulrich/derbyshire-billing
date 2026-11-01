@@ -870,8 +870,12 @@ function Billing({ customers, activeCycle, rate, payments, billingOverrides, can
   const selectedBill = overrideCustomer ? billFor(overrideCustomer, rate, months) : null
   const selectedOverride = overrideCustomer ? billingOverrideFor(billingOverrides, overrideCustomer.id, activeCycle?.id) : undefined
   const exportCsv = () => {
-    const header = 'Bookkeeper ID,Customer,Service address,Billing address,Invoice period,Item,Description,Quantity,Rate,Amount'
-    const body = rows.flatMap(c => {
+    const header = [
+      'Bookkeeper ID', 'Customer', 'Service address', 'Billing address', 'Invoice period', 'Usage (CF)',
+      'Unpaid balance carried forward', 'Base charge', 'Maintenance surcharge', 'Board member discount',
+      'Tier 1 usage charge', 'Tier 2 usage charge', 'Billing adjustment', 'Total',
+    ]
+    const body = rows.map(c => {
       const b = billFor(c, rate, months)
       const override = billingOverrideFor(billingOverrides, c.id, activeCycle?.id)
       const adjustment = override ? roundToCents(override.amount - b.total) : 0
@@ -880,17 +884,15 @@ function Billing({ customers, activeCycle, rate, payments, billingOverrides, can
       const billing = formattedAddress(c, true)
       const paid = roundToCents(payments.filter(payment => String(payment.customerId) === String(c.id)).reduce((sum, payment) => sum + payment.amount, 0))
       const unpaidBalance = roundToCents(Number(c.priorBalance || 0) - paid)
+      const currentCharge = override?.amount ?? b.total
+      const totalDue = roundToCents(unpaidBalance + currentCharge)
       return [
-        [bookkeeperId, c.name, service, billing, period, 'BALANCE-FORWARD', 'Unpaid balance or credit carried forward', 1, unpaidBalance, unpaidBalance],
-        [bookkeeperId, c.name, service, billing, period, 'WATER-BASE', `Base charge (includes first ${formatNumber(rate.included)} CF)`, 1, rate.base, rate.base],
-        [bookkeeperId, c.name, service, billing, period, 'MAINTENANCE', `Maintenance surcharge (${months} months)`, months, rate.maintenanceMonthly, b.maintenance],
-        ...(b.boardMemberDiscount > 0 ? [[bookkeeperId, c.name, service, billing, period, 'BOARD-DISCOUNT', 'Board member base-rate discount', 1, -rate.boardMemberDiscount, -b.boardMemberDiscount]] : []),
-        ...(b.tierOneUnits ? [[bookkeeperId, c.name, service, billing, period, 'WATER-TIER-1', `Usage ${rate.included + 1}–${rate.tierOneEnd} CF`, roundToCents(b.tierOneUnits / 100), rate.tierOne, b.tierOneAmount]] : []),
-        ...(b.tierTwoUnits ? [[bookkeeperId, c.name, service, billing, period, 'WATER-TIER-2', `Usage ${rate.tierOneEnd + 1}+ CF`, roundToCents(b.tierTwoUnits / 100), rate.tierTwo, b.tierTwoAmount]] : []),
-        ...(override && adjustment !== 0 ? [[bookkeeperId, c.name, service, billing, period, 'BILL-ADJUSTMENT', `Billing adjustment: ${override.reason}`, 1, adjustment, adjustment]] : []),
+        bookkeeperId, c.name, service, billing, period, b.usage,
+        unpaidBalance, rate.base, b.maintenance, -b.boardMemberDiscount,
+        b.tierOneAmount, b.tierTwoAmount, adjustment, totalDue,
       ]
     }).map(row => row.map(value => `"${String(value).replaceAll('"', '""')}"`).join(','))
-    const blob = new Blob([[header, ...body].join('\n')], { type: 'text/csv' })
+    const blob = new Blob([[header.join(','), ...body].join('\n')], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
