@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import L from 'leaflet'
 import Parse from './lib/parse'
 
-type View = 'dashboard' | 'readings' | 'route' | 'customers' | 'customer-detail' | 'billing' | 'accounts' | 'users'
+type View = 'dashboard' | 'readings' | 'route' | 'customers' | 'customer-detail' | 'billing' | 'accounts' | 'district-usage' | 'account-usage' | 'users'
 type Role = 'meter-reader' | 'bookkeeper' | 'administrator'
 type Customer = {
   id: string | number; name: string; address: string; serviceAddress1?: string; serviceAddress2?: string; serviceCity?: string; serviceState?: string; serviceZip?: string; billingSameAsService?: boolean; billingAddress1?: string; billingAddress2?: string; billingCity?: string; billingState?: string; billingZip?: string; phone: string; email: string
@@ -14,6 +14,7 @@ type RateSchedule = { id: string | number; base: number; maintenanceMonthly: num
 type Payment = { id: string | number; customerId: string | number; amount: number; paymentDate: string; method: string; reference: string; notes: string }
 type BillingOverride = { id: string | number; customerId: string | number; cycleId: string | number; amount: number; reason: string; updatedAt?: string }
 type MeterHistory = { id: string | number; reading: number; previousReading: number; readAt: string; cycleName: string; readerName: string }
+type UsageRecord = { id: string | number; customerId: string | number; cycleId: string | number; reading: number; previousReading: number; readAt: string }
 type CustomerHistory = { readings: MeterHistory[]; payments: Payment[]; adjustments: BillingOverride[] }
 
 const RATE: RateSchedule = { id: 'default-rate', base: 265.23, maintenanceMonthly: 40, included: 4000, tierOneEnd: 8000, tierOne: 3.50, tierTwo: 3.93, boardMemberDiscount: 170, effectiveDate: '2026-09-01' }
@@ -236,10 +237,41 @@ async function exportCustomersXlsx(customers: Customer[]) {
   XLSX.writeFile(workbook, `derbyshire-water-customer-export-${today}.xlsx`)
 }
 
+async function exportReportWorkbook(filename: string, sheets: { name: string; title: string; subtitle: string; headers: string[]; rows: (string | number | null)[][]; widths: number[] }[]) {
+  const XLSX = await import('xlsx-js-style')
+  const workbook = XLSX.utils.book_new()
+  const border = { style: 'thin', color: { rgb: 'D6E5E3' } }
+  const titleStyle = { font: { name: 'Arial', sz: 18, bold: true, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: '123B4A' } }, alignment: { vertical: 'center' } }
+  const subtitleStyle = { font: { name: 'Arial', sz: 10, color: { rgb: '315A64' } }, fill: { patternType: 'solid', fgColor: { rgb: 'E8F2F1' } }, alignment: { vertical: 'center' } }
+  const headerStyle = { font: { name: 'Arial', sz: 10, bold: true, color: { rgb: 'FFFFFF' } }, fill: { patternType: 'solid', fgColor: { rgb: '2C7A7B' } }, alignment: { vertical: 'center', wrap_text: true }, border: { top: border, bottom: border, left: border, right: border } }
+  sheets.forEach(({ name, title, subtitle, headers, rows, widths }) => {
+    const worksheet = XLSX.utils.aoa_to_sheet([[title], [subtitle], [], headers, ...rows])
+    const lastColumn = headers.length - 1
+    const lastRow = rows.length + 4
+    const lastColumnLetter = XLSX.utils.encode_col(lastColumn)
+    worksheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: lastColumn } }, { s: { r: 1, c: 0 }, e: { r: 1, c: lastColumn } }]
+    worksheet['!autofilter'] = { ref: `A4:${lastColumnLetter}${lastRow}` }
+    worksheet['!cols'] = widths.map(wch => ({ wch }))
+    worksheet['!rows'] = [{ hpt: 30 }, { hpt: 25 }, {}, { hpt: 34 }]
+    if (worksheet.A1) worksheet.A1.s = titleStyle
+    if (worksheet.A2) worksheet.A2.s = subtitleStyle
+    headers.forEach((_, column) => { const cell = worksheet[XLSX.utils.encode_cell({ r: 3, c: column })]; if (cell) cell.s = headerStyle })
+    rows.forEach((row, rowIndex) => row.forEach((value, column) => {
+      const cell = worksheet[XLSX.utils.encode_cell({ r: rowIndex + 4, c: column })]
+      if (!cell) return
+      cell.s = { font: { name: 'Arial', sz: 10, color: { rgb: '234951' } }, fill: { patternType: 'solid', fgColor: { rgb: rowIndex % 2 ? 'EFF8F7' : 'FFFFFF' } }, border: { bottom: border } }
+      if (typeof value === 'number') cell.z = '#,##0;[Red]-#,##0'
+    }))
+    XLSX.utils.book_append_sheet(workbook, worksheet, name.slice(0, 31))
+  })
+  XLSX.writeFile(workbook, filename)
+}
+
 function Icon({ name }: { name: string }) {
   const paths: Record<string, string> = {
     grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
     gauge: 'M4 18a8 8 0 1 1 16 0M12 10v6m0 0 4-3', map: 'M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3V6zm6-3v15m6-12v15',
+    chart: 'M4 19V5m0 14h16M8 15v-4m4 4V7m4 8V9',
     users: 'M16 20v-1a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v1m6-9a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm7-4a3 3 0 0 1 0 6m2 7v-1a4 4 0 0 0-3-3',
     receipt: 'M6 3h12v18l-3-2-3 2-3-2-3 2V3zm3 5h6m-6 4h6m-6 4h3', plus: 'M12 5v14m-7-7h14', download: 'M12 3v12m0 0 4-4m-4 4-4-4M5 21h14',
     search: 'm20 20-4.3-4.3M10.8 17a6.2 6.2 0 1 1 0-12.4 6.2 6.2 0 0 1 0 12.4z', check: 'm5 12 4 4L19 6', alert: 'M12 3 2 21h20L12 3zm0 6v4m0 4h.01', chevron: 'm9 18 6-6-6-6', edit: 'M4 20h4L19 9l-4-4L4 16v4zm9-13 4 4', trash: 'M4 7h16m-10 4v6m4-6v6m-8-10 1 13h10l1-13M9 7V4h6v3', sort: 'M8 6h12M4 6h.01M4 12h.01M8 12h12M4 18h.01M8 18h12', lock: 'M6 10V8a6 6 0 0 1 12 0v2m-1 0H7a2 2 0 0 0-2 2v7h14v-7a2 2 0 0 1-2-2z', copy: 'M9 9h10v12H9zM5 15V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1', menu: 'M4 6h16M4 12h16M4 18h16', close: 'M6 6l12 12M18 6 6 18', arrow: 'm5 12h14m-6-6 6 6-6 6', up: 'm6 15 6-6 6 6', down: 'm6 9 6 6 6-6'
@@ -346,7 +378,7 @@ function RealMap({ customers, editable = false, onMove, onSaveReading }: { custo
 
 function App({ parseReady = false }: { parseReady?: boolean }) {
   const [view, setView] = useState<View>(() => {
-    const validViews: View[] = ['dashboard', 'readings', 'route', 'customers', 'billing', 'accounts', 'users']
+    const validViews: View[] = ['dashboard', 'readings', 'route', 'customers', 'billing', 'accounts', 'district-usage', 'account-usage', 'users']
     try {
       const savedView = localStorage.getItem('derbyshire-view') as View | null
       return savedView && validViews.includes(savedView) ? savedView : 'dashboard'
@@ -394,6 +426,10 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
     try { return JSON.parse(localStorage.getItem('derbyshire-billing-overrides') || '[]') } catch { return [] }
   })
   const [billingOverridesLoaded, setBillingOverridesLoaded] = useState(!parseReady)
+  const [usageRecords, setUsageRecords] = useState<UsageRecord[]>(() => {
+    if (parseReady) return []
+    try { return JSON.parse(localStorage.getItem('derbyshire-meter-readings') || '[]') } catch { return [] }
+  })
 
   useEffect(() => { if (!parseReady) localStorage.setItem('derbyshire-customers', JSON.stringify(customers)) }, [customers, parseReady])
   useEffect(() => { if (!parseReady) localStorage.setItem('derbyshire-cycles', JSON.stringify(cycles)) }, [cycles, parseReady])
@@ -401,6 +437,7 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
   useEffect(() => { if (!parseReady) localStorage.setItem('derbyshire-users', JSON.stringify(users)) }, [users, parseReady])
   useEffect(() => { if (!parseReady) localStorage.setItem('derbyshire-payments', JSON.stringify(payments)) }, [payments, parseReady])
   useEffect(() => { if (!parseReady) localStorage.setItem('derbyshire-billing-overrides', JSON.stringify(billingOverrides)) }, [billingOverrides, parseReady])
+  useEffect(() => { if (!parseReady) localStorage.setItem('derbyshire-meter-readings', JSON.stringify(usageRecords)) }, [usageRecords, parseReady])
   useEffect(() => { try { localStorage.setItem('derbyshire-view', view) } catch { /* Ignore unavailable browser storage. */ } }, [view])
   useEffect(() => { if (toast) { const t = setTimeout(() => setToast(''), 2800); return () => clearTimeout(t) } }, [toast])
   useEffect(() => {
@@ -468,9 +505,40 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
         reading.set('reader', Parse.User.current())
         await reading.save()
       }
+      if (activeCycle) setUsageRecords(records => [...records.filter(record => String(record.customerId) !== String(id) || String(record.cycleId) !== String(activeCycle.id)), { id: `${activeCycle.id}-${id}`, customerId: id, cycleId: activeCycle.id, reading: value, previousReading: customer.previous, readAt: today }])
       setCustomers(items => items.map(c => c.id === id ? saved : c))
       setConfirmReading(null); setToast(`Reading saved for ${formattedAddress(customer)}`)
     } catch (error) { setToast(error instanceof Error ? error.message : 'Could not save reading') }
+  }
+  const loadUsageRecords = async (cycleIds: (string | number)[]) => {
+    if (!parseReady) {
+      const selected = new Set(cycleIds.map(String))
+      const records = usageRecords.filter(record => selected.has(String(record.cycleId)))
+      if (activeCycle && selected.has(String(activeCycle.id))) {
+        const existing = new Set(records.map(record => String(record.customerId)))
+        const currentRecords = customers.filter(customer => customer.current !== null && !existing.has(String(customer.id))).map(customer => ({ id: `current-${activeCycle.id}-${customer.id}`, customerId: customer.id, cycleId: activeCycle.id, reading: customer.current!, previousReading: customer.previous, readAt: customer.lastRead || '' }))
+        records.push(...currentRecords)
+      }
+      return records
+    }
+    const records: UsageRecord[] = []
+    const cyclePointers = cycleIds.map(cycleId => {
+      const cyclePointer = new Parse.Object('ReadingCycle')
+      cyclePointer.id = String(cycleId)
+      return cyclePointer
+    })
+    let skip = 0
+    while (true) {
+      const page = await new Parse.Query('MeterReading').containedIn('cycle', cyclePointers).ascending('createdAt').limit(1000).skip(skip).find()
+      records.push(...page.map(reading => {
+        const customerPointer = reading.get('customer') as Parse.Object | undefined
+        const cyclePointer = reading.get('cycle') as Parse.Object | undefined
+        return { id: reading.id || '', customerId: customerPointer?.id || '', cycleId: cyclePointer?.id || '', reading: Number(reading.get('reading') || 0), previousReading: Number(reading.get('previousReading') || 0), readAt: reading.get('readAt') || '' }
+      }))
+      if (page.length < 1000) break
+      skip += page.length
+    }
+    return records
   }
   const savePreviousReading = async (id: string | number, value: number) => {
     const customer = customers.find(c => c.id === id)
@@ -724,13 +792,13 @@ function App({ parseReady = false }: { parseReady?: boolean }) {
       <div className="brand"><div className="brand-mark">D</div><div><strong>Derbyshire</strong><span>Water District</span></div><button className="mobile-close" onClick={() => setMobileMenuOpen(false)}><Icon name="close" /></button></div>
       <div className="workspace-label">WORKSPACE</div>
       <nav>{([
-        ['dashboard', 'grid', 'Overview'], ['readings', 'gauge', 'Read meters'], ['route', 'map', 'Route plan'], ['customers', 'users', 'Customers'], ['billing', 'receipt', 'Billing export'], ...(role === 'administrator' || role === 'bookkeeper' ? [['accounts', 'receipt', 'Balances & payments'] as [View, string, string]] : []), ...(role === 'administrator' ? [['users', 'users', 'Users'] as [View, string, string]] : []),
+        ['dashboard', 'grid', 'Overview'], ['readings', 'gauge', 'Read meters'], ['route', 'map', 'Route plan'], ['customers', 'users', 'Customers'], ['billing', 'receipt', 'Billing export'], ['district-usage', 'chart', 'District usage report'], ['account-usage', 'chart', 'Account usage report'], ...(role === 'administrator' || role === 'bookkeeper' ? [['accounts', 'receipt', 'Balances & payments'] as [View, string, string]] : []), ...(role === 'administrator' ? [['users', 'users', 'Users'] as [View, string, string]] : []),
       ] as [View, string, string][]).map(([key, icon, label]) => <button key={key} className={view === key ? 'nav-item active' : 'nav-item'} onClick={() => navigate(key)}><Icon name={icon} /><span>{label}</span>{key === 'readings' && unread > 0 && <em>{unread}</em>}</button>)}</nav>
       <div className="sidebar-bottom"><div className="secure"><Icon name="lock" /><div><strong>{parseReady ? 'Parse connected' : 'Demo workspace'}</strong><span>{parseReady ? 'Back4App protected' : 'Add env.local'}</span></div></div><div className="user-card"><div className="avatar">{displayInitials}</div><div><strong>{displayName}</strong><span>{roleLabel(role)}</span></div><button className="more" title={parseReady ? 'Sign out' : 'Switch role'} onClick={() => parseReady ? logOut() : setRole(nextDemoRole(role))}>{parseReady ? '↪' : '↕'}</button></div></div>
     </aside>
     {mobileMenuOpen && <button className="mobile-nav-backdrop" aria-label="Close menu" onClick={() => setMobileMenuOpen(false)} />}
     <main className="main"><header className="topbar"><button className="mobile-menu" aria-label="Open menu" title="Open menu" onClick={() => setMobileMenuOpen(true)}><Icon name="menu" /></button><div className="crumb">{activeCycle?.name || 'No active checkpoint'} <span>·</span> {activeCycle ? `Due ${activeCycle.dueDate}` : 'Create one to begin'}</div><div className="top-actions"><button className="help" aria-label="Help" title="Help">?</button><button className="role-pill" onClick={() => parseReady ? logOut() : setRole(nextDemoRole(role))}>{parseReady ? 'Sign out' : roleLabel(role)} <span>{parseReady ? '↪' : '⌄'}</span></button></div></header>
-      <div className="content">{dataLoading && <div className="data-loading"><span className="loading-dot" /> Loading customer data from Back4App…</div>}{view === 'dashboard' && <Dashboard customers={customers} unread={unread} readCount={readCount} navigate={navigate} rate={rate} activeCycle={activeCycle} userName={displayName} />}{view === 'readings' && <Readings customers={customers} activeCycle={activeCycle} onSave={saveReading} onSavePrevious={savePreviousReading} onCreateCycle={createCycle} onMoveLocation={moveCustomerLocation} />}{view === 'route' && <RoutePlan customers={customers} onMove={moveRoute} onReorder={reorderRoute} onMenu={() => setMobileMenuOpen(true)} onMoveLocation={moveCustomerLocation} />}{view === 'customers' && <Customers customers={customers} onOpen={openCustomer} onEdit={setEditing} onCopyEmail={copyEmail} onAdd={() => setEditing({ id: `temp-${Date.now()}`, name: '', address: '', phone: '', phone2: '', email: '', email2: '', previous: 0, current: null, lastRead: null, route: customers.length + 1, lat: 0, lng: 0 })} />}{view === 'customer-detail' && selectedCustomer && <CustomerDetails customer={selectedCustomer} parseReady={parseReady} canViewFinancial={role === 'administrator' || role === 'bookkeeper'} rate={rate} activeCycle={activeCycle} payments={payments} billingOverrides={billingOverrides} onBack={() => navigate('customers')} onEdit={setEditing} onCopyEmail={copyEmail} onRecordPayment={recordPayment} onUpdatePayment={updatePayment} onSetPriorBalance={setPriorBalance} onSetBillingOverride={saveBillingOverride} onClearBillingOverride={clearBillingOverride} />}{view === 'billing' && <Billing customers={customers} activeCycle={activeCycle} rate={rate} payments={payments} billingOverrides={billingOverrides} canManage={role === 'administrator'} canOverride={role === 'administrator' || role === 'bookkeeper'} onExportBackup={exportDatabaseBackup} onSaveRate={async nextRate => { try { let object: Parse.Object; if (parseReady && typeof nextRate.id === 'string' && nextRate.id !== 'default-rate') object = await new Parse.Query('RateSchedule').get(nextRate.id); else object = new Parse.Object('RateSchedule'); Object.entries(nextRate).forEach(([key, value]) => { if (key !== 'id') object.set(key, value) }); const saved = parseReady ? rateFromParse(await object.save()) : nextRate; setRate(saved); setToast(parseReady ? 'Rate schedule saved to Back4App' : 'Rate schedule updated') } catch (error) { setToast(error instanceof Error ? error.message : 'Could not save rates') } }} onUpdateCycle={async nextCycle => { if (parseReady && typeof nextCycle.id === 'string' && nextCycle.id !== 'demo-cycle') { const object = await new Parse.Query('ReadingCycle').get(nextCycle.id); object.set('name', nextCycle.name); object.set('startDate', nextCycle.startDate); object.set('dueDate', nextCycle.dueDate); object.set('months', nextCycle.months); await object.save() } setCycles(items => items.map(item => item.id === nextCycle.id ? nextCycle : item)); setToast('Billing period updated') }} onSetBillingOverride={saveBillingOverride} onClearBillingOverride={clearBillingOverride} />}{view === 'accounts' && (role === 'administrator' || role === 'bookkeeper') && <Accounts customers={customers} rate={rate} activeCycle={activeCycle} payments={payments} billingOverrides={billingOverrides} onRecordPayment={recordPayment} onUpdatePayment={updatePayment} onSetPriorBalance={setPriorBalance} onSetBillingOverride={saveBillingOverride} onClearBillingOverride={clearBillingOverride} />}{view === 'users' && role === 'administrator' && <Users users={users} onAdd={addUser} onUpdate={updateUser} onDelete={deleteUser} onToggle={toggleUser} />}</div>
+      <div className="content">{dataLoading && <div className="data-loading"><span className="loading-dot" /> Loading customer data from Back4App…</div>}{view === 'dashboard' && <Dashboard customers={customers} unread={unread} readCount={readCount} navigate={navigate} rate={rate} activeCycle={activeCycle} userName={displayName} />}{view === 'readings' && <Readings customers={customers} activeCycle={activeCycle} onSave={saveReading} onSavePrevious={savePreviousReading} onCreateCycle={createCycle} onMoveLocation={moveCustomerLocation} />}{view === 'route' && <RoutePlan customers={customers} onMove={moveRoute} onReorder={reorderRoute} onMenu={() => setMobileMenuOpen(true)} onMoveLocation={moveCustomerLocation} />}{view === 'customers' && <Customers customers={customers} onOpen={openCustomer} onEdit={setEditing} onCopyEmail={copyEmail} onAdd={() => setEditing({ id: `temp-${Date.now()}`, name: '', address: '', phone: '', phone2: '', email: '', email2: '', previous: 0, current: null, lastRead: null, route: customers.length + 1, lat: 0, lng: 0 })} />}{view === 'customer-detail' && selectedCustomer && <CustomerDetails customer={selectedCustomer} parseReady={parseReady} canViewFinancial={role === 'administrator' || role === 'bookkeeper'} rate={rate} activeCycle={activeCycle} payments={payments} billingOverrides={billingOverrides} onBack={() => navigate('customers')} onEdit={setEditing} onCopyEmail={copyEmail} onRecordPayment={recordPayment} onUpdatePayment={updatePayment} onSetPriorBalance={setPriorBalance} onSetBillingOverride={saveBillingOverride} onClearBillingOverride={clearBillingOverride} />}{view === 'billing' && <Billing customers={customers} activeCycle={activeCycle} rate={rate} payments={payments} billingOverrides={billingOverrides} canManage={role === 'administrator'} canOverride={role === 'administrator' || role === 'bookkeeper'} onExportBackup={exportDatabaseBackup} onSaveRate={async nextRate => { try { let object: Parse.Object; if (parseReady && typeof nextRate.id === 'string' && nextRate.id !== 'default-rate') object = await new Parse.Query('RateSchedule').get(nextRate.id); else object = new Parse.Object('RateSchedule'); Object.entries(nextRate).forEach(([key, value]) => { if (key !== 'id') object.set(key, value) }); const saved = parseReady ? rateFromParse(await object.save()) : nextRate; setRate(saved); setToast(parseReady ? 'Rate schedule saved to Back4App' : 'Rate schedule updated') } catch (error) { setToast(error instanceof Error ? error.message : 'Could not save rates') } }} onUpdateCycle={async nextCycle => { if (parseReady && typeof nextCycle.id === 'string' && nextCycle.id !== 'demo-cycle') { const object = await new Parse.Query('ReadingCycle').get(nextCycle.id); object.set('name', nextCycle.name); object.set('startDate', nextCycle.startDate); object.set('dueDate', nextCycle.dueDate); object.set('months', nextCycle.months); await object.save() } setCycles(items => items.map(item => item.id === nextCycle.id ? nextCycle : item)); setToast('Billing period updated') }} onSetBillingOverride={saveBillingOverride} onClearBillingOverride={clearBillingOverride} />}{(view === 'district-usage' || view === 'account-usage') && <UsageReports mode={view === 'district-usage' ? 'district' : 'account'} customers={customers} cycles={cycles} onLoadRecords={loadUsageRecords} />}{view === 'accounts' && (role === 'administrator' || role === 'bookkeeper') && <Accounts customers={customers} rate={rate} activeCycle={activeCycle} payments={payments} billingOverrides={billingOverrides} onRecordPayment={recordPayment} onUpdatePayment={updatePayment} onSetPriorBalance={setPriorBalance} onSetBillingOverride={saveBillingOverride} onClearBillingOverride={clearBillingOverride} />}{view === 'users' && role === 'administrator' && <Users users={users} onAdd={addUser} onUpdate={updateUser} onDelete={deleteUser} onToggle={toggleUser} />}</div>
     </main>
     {editing && <CustomerModal customer={editing} onClose={() => setEditing(null)} onSave={updateCustomer} onDelete={deleteCustomer} />}
     {confirmReading && <ConfirmModal customer={confirmReading.customer} value={confirmReading.value} onCancel={() => setConfirmReading(null)} onConfirm={() => saveReading(confirmReading.customer.id, confirmReading.value, true)} />}
@@ -925,6 +993,88 @@ function Billing({ customers, activeCycle, rate, payments, billingOverrides, can
     <p className="billing-note">Meter usage is measured in CF. Partial 100-CF usage is prorated, with charges rounded to the nearest cent. Unpaid balance carried forward equals the prior account balance less recorded payments. A bill override changes only the current billing charge and records the reason; meter readings remain unchanged. Billing period and rates are editable by administrators.</p>
     {settingsOpen && <BillingSettingsModal rate={rate} cycle={activeCycle} onClose={() => setSettingsOpen(false)} onSaveRate={onSaveRate} onUpdateCycle={onUpdateCycle} />}
     {overrideCustomer && activeCycle && selectedBill && <BillingOverrideModal customer={overrideCustomer} cycle={activeCycle} calculatedAmount={selectedBill.total} currentOverride={selectedOverride} onClose={() => setOverrideCustomer(null)} onSave={async (amount, reason) => { const saved = await onSetBillingOverride(overrideCustomer.id, amount, reason); if (saved) setOverrideCustomer(null); return saved }} onClear={async () => { const cleared = await onClearBillingOverride(overrideCustomer.id); if (cleared) setOverrideCustomer(null); return cleared }} />}
+  </>
+}
+
+function UsageReports({ mode, customers, cycles, onLoadRecords }: { mode: 'district' | 'account'; customers: Customer[]; cycles: ReadingCycle[]; onLoadRecords: (cycleIds: (string | number)[]) => Promise<UsageRecord[]> }) {
+  const orderedCycles = [...cycles].sort((a, b) => b.startDate.localeCompare(a.startDate))
+  const orderedCustomers = [...customers].sort((a, b) => lastNameForSort(a.name).localeCompare(lastNameForSort(b.name), 'en', { sensitivity: 'base' }))
+  const [selectedCycleIds, setSelectedCycleIds] = useState<string[]>(() => orderedCycles.length ? [String(orderedCycles[0].id)] : [])
+  const [accountId, setAccountId] = useState(() => orderedCustomers[0] ? String(orderedCustomers[0].id) : '')
+  const [working, setWorking] = useState(false)
+  const [error, setError] = useState('')
+  const [reportRecords, setReportRecords] = useState<UsageRecord[] | null>(null)
+  useEffect(() => { if (!selectedCycleIds.length && orderedCycles.length) setSelectedCycleIds([String(orderedCycles[0].id)]) }, [cycles.length])
+  useEffect(() => { if (!accountId && orderedCustomers.length) setAccountId(String(orderedCustomers[0].id)) }, [customers.length])
+  const selectedCycles = orderedCycles.filter(cycle => selectedCycleIds.includes(String(cycle.id)))
+  const selectedCustomer = orderedCustomers.find(customer => String(customer.id) === accountId)
+  const recordByAccountCycle = new Map<string, UsageRecord>((reportRecords || []).map(record => [`${record.cycleId}:${record.customerId}`, record] as [string, UsageRecord]))
+  const getRecord = (cycle: ReadingCycle, customer: Customer) => recordByAccountCycle.get(`${cycle.id}:${customer.id}`)
+  const invalidatePreview = () => { setReportRecords(null); setError('') }
+  const toggleCycle = (id: string) => { invalidatePreview(); setSelectedCycleIds(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]) }
+  const loadPreview = async () => {
+    if (!selectedCycles.length || (mode === 'account' && !selectedCustomer)) return
+    setWorking(true)
+    setError('')
+    try {
+      setReportRecords(await onLoadRecords(selectedCycles.map(cycle => cycle.id)))
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not load the usage report') }
+    finally { setWorking(false) }
+  }
+  const exportReport = async () => {
+    if (!selectedCycles.length || !reportRecords || (mode === 'account' && !selectedCustomer)) return
+    setWorking(true)
+    setError('')
+    try {
+      if (mode === 'district') {
+        const summaryRows = selectedCycles.map(cycle => {
+          const cycleRecords = [...recordByAccountCycle.values()].filter(record => String(record.cycleId) === String(cycle.id))
+          const totalUsage = cycleRecords.reduce((sum, record) => sum + Math.max(0, record.reading - record.previousReading), 0)
+          return [cycle.name, cycle.startDate, cycle.dueDate, cycle.months, cycleRecords.length, customers.length, totalUsage, cycleRecords.length ? Math.round(totalUsage / cycleRecords.length) : 0]
+        })
+        const detailRows = selectedCycles.flatMap(cycle => orderedCustomers.map(customer => {
+          const record = recordByAccountCycle.get(`${cycle.id}:${customer.id}`)
+          const usage = record ? Math.max(0, record.reading - record.previousReading) : null
+          return [normalizeBookkeeperId(customer.customerId || customer.accountNumber), customer.name, formattedAddress(customer), cycle.name, cycle.startDate, cycle.dueDate, record?.previousReading ?? null, record?.reading ?? null, usage, record?.readAt || 'Not read']
+        }))
+        await exportReportWorkbook('derbyshire-district-usage-report.xlsx', [
+          { name: 'Checkpoint Summary', title: 'Derbyshire Water District Usage', subtitle: `Selected checkpoints · ${selectedCycles.length} billing period${selectedCycles.length === 1 ? '' : 's'} · Generated ${today}`, headers: ['Checkpoint', 'Period start', 'Period end', 'Months', 'Accounts read', 'Accounts', 'Total usage (CF)', 'Average usage (CF)'], rows: summaryRows, widths: [26, 15, 15, 10, 15, 12, 20, 22] },
+          { name: 'Account Detail', title: 'Usage by Account and Checkpoint', subtitle: 'Meter readings and net consumption for each account in the selected checkpoints. Unread accounts have blank reading and usage values.', headers: ['Bookkeeper ID', 'Account', 'Service address', 'Checkpoint', 'Period start', 'Period end', 'Previous reading (CF)', 'Current reading (CF)', 'Net usage (CF)', 'Read date / status'], rows: detailRows, widths: [22, 30, 38, 26, 15, 15, 22, 21, 17, 22] },
+        ])
+      } else if (selectedCustomer) {
+        const reportRows = selectedCycles.map(cycle => {
+          const record = recordByAccountCycle.get(`${cycle.id}:${selectedCustomer.id}`)
+          return [cycle.name, cycle.startDate, cycle.dueDate, record?.previousReading ?? null, record?.reading ?? null, record ? Math.max(0, record.reading - record.previousReading) : null, record?.readAt || 'Not read']
+        })
+        const safeName = selectedCustomer.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'account'
+        await exportReportWorkbook(`derbyshire-account-usage-${safeName}.xlsx`, [{
+          name: 'Account Usage', title: `${selectedCustomer.name} · Meter Usage History`, subtitle: `${formattedAddress(selectedCustomer)} · Bookkeeper ID: ${normalizeBookkeeperId(selectedCustomer.customerId || selectedCustomer.accountNumber) || 'Not set'} · Generated ${today}`,
+          headers: ['Checkpoint', 'Period start', 'Period end', 'Previous reading (CF)', 'Current reading (CF)', 'Net usage (CF)', 'Read date / status'], rows: reportRows, widths: [28, 16, 16, 23, 22, 18, 22],
+        }])
+      }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not create the usage report') }
+    finally { setWorking(false) }
+  }
+  const isDistrict = mode === 'district'
+  return <>
+    <PageTitle eyebrow="REPORTS" title={isDistrict ? 'District usage report' : 'Account usage report'} description={isDistrict ? 'Review water usage by checkpoint across the district.' : 'Review an account’s meter usage across selected billing periods.'} action={<div className="report-actions"><button className="secondary" onClick={loadPreview} disabled={working || !selectedCycles.length || (!isDistrict && !selectedCustomer)}>{working && !reportRecords ? 'Loading…' : reportRecords ? 'Refresh table' : 'Show table'}</button><button className="primary" onClick={exportReport} disabled={working || !reportRecords || !selectedCycles.length || (!isDistrict && !selectedCustomer)}><Icon name="download" /> {working && reportRecords ? 'Preparing…' : 'Export Excel'}</button></div>} />
+    <div className="report-layout">
+      <section className="panel report-card">
+        <div className="panel-head"><div><h2>Billing periods</h2><p>Select one or more checkpoints to include.</p></div><div className="report-select-actions"><button type="button" className="link-button" onClick={() => { invalidatePreview(); setSelectedCycleIds(orderedCycles.map(cycle => String(cycle.id))) }}>Select all</button><button type="button" className="link-button" onClick={() => { invalidatePreview(); setSelectedCycleIds([]) }}>Clear</button></div></div>
+        {orderedCycles.length ? <div className="report-cycle-list">{orderedCycles.map(cycle => <label className="report-cycle-option" key={cycle.id}><input type="checkbox" checked={selectedCycleIds.includes(String(cycle.id))} onChange={() => toggleCycle(String(cycle.id))} /><span><strong>{cycle.name}</strong><small>{cycle.startDate} to {cycle.dueDate} · {cycle.months} months · {cycle.status === 'open' ? 'Open' : 'Closed'}</small></span></label>)}</div> : <div className="detail-empty">No billing checkpoints are available yet.</div>}
+      </section>
+      {isDistrict ? <section className="panel report-card report-description"><div className="report-icon"><Icon name="chart" /></div><h2>District-wide usage</h2><p>The Excel file includes a checkpoint summary with total and average usage, plus account-level readings and net usage for every selected period.</p><div className="report-metric"><span>Selected periods</span><strong>{selectedCycles.length}</strong></div><div className="report-metric"><span>Accounts in report</span><strong>{customers.length}</strong></div></section> : <section className="panel report-card report-description"><div className="report-icon"><Icon name="users" /></div><h2>Usage by account</h2><p>Choose a customer and compare their previous reading, current reading, and net usage across the selected billing periods.</p><div className="report-metric"><span>Selected periods</span><strong>{selectedCycles.length}</strong></div></section>}
+      {!isDistrict && <div className="report-account-change"><label className="report-account-select">Customer account<select value={accountId} onChange={event => { invalidatePreview(); setAccountId(event.target.value) }}>{orderedCustomers.map(customer => <option key={customer.id} value={String(customer.id)}>{customer.name}{customer.customerId ? ` · ${normalizeBookkeeperId(customer.customerId)}` : ''}</option>)}</select></label>{selectedCustomer && <span>{formattedAddress(selectedCustomer)} · Bookkeeper ID: {normalizeBookkeeperId(selectedCustomer.customerId || selectedCustomer.accountNumber) || 'Not set'}</span>}</div>}
+      <section className="panel report-preview">
+        <div className="panel-head"><div><h2>{isDistrict ? 'District usage table' : 'Account usage table'}</h2><p>{reportRecords ? `${selectedCycles.length} selected period${selectedCycles.length === 1 ? '' : 's'}` : 'Select billing periods, then choose Show table.'}</p></div></div>
+        {!reportRecords ? <div className="detail-empty">The report table will appear here.</div> : isDistrict ? <>
+          <h3>Checkpoint summary</h3><div className="report-table-wrap"><table className="report-data-table"><thead><tr>{['Checkpoint', 'Period', 'Accounts read', 'Total usage (CF)', 'Average (CF)'].map(title => <th key={title}>{title}</th>)}</tr></thead><tbody>{selectedCycles.map(cycle => { const cycleRecords = [...recordByAccountCycle.values()].filter(record => String(record.cycleId) === String(cycle.id)); const usage = cycleRecords.reduce((sum, record) => sum + Math.max(0, record.reading - record.previousReading), 0); return <tr key={cycle.id}><td>{cycle.name}</td><td>{cycle.startDate} to {cycle.dueDate}</td><td>{cycleRecords.length} / {customers.length}</td><td>{formatNumber(usage)}</td><td>{cycleRecords.length ? formatNumber(Math.round(usage / cycleRecords.length)) : '—'}</td></tr> })}</tbody></table></div>
+          <h3 className="report-detail-heading">Account details by checkpoint</h3><div className="report-table-wrap report-detail-wrap"><table className="report-data-table"><thead><tr>{['Account', 'Bookkeeper ID', 'Checkpoint', 'Previous (CF)', 'Current (CF)', 'Usage (CF)', 'Read date'].map(title => <th key={title}>{title}</th>)}</tr></thead><tbody>{selectedCycles.flatMap(cycle => orderedCustomers.map(customer => { const record = getRecord(cycle, customer); return <tr key={`${cycle.id}:${customer.id}`}><td>{customer.name}</td><td>{normalizeBookkeeperId(customer.customerId || customer.accountNumber) || '—'}</td><td>{cycle.name}</td><td>{record ? formatNumber(record.previousReading) : '—'}</td><td>{record ? formatNumber(record.reading) : '—'}</td><td>{record ? formatNumber(Math.max(0, record.reading - record.previousReading)) : '—'}</td><td>{record?.readAt || 'Not read'}</td></tr> }))}</tbody></table></div>
+        </> : selectedCustomer ? <div className="report-table-wrap"><table className="report-data-table"><thead><tr>{['Checkpoint', 'Period', 'Previous (CF)', 'Current (CF)', 'Net usage (CF)', 'Read date / status'].map(title => <th key={title}>{title}</th>)}</tr></thead><tbody>{selectedCycles.map(cycle => { const record = getRecord(cycle, selectedCustomer); return <tr key={cycle.id}><td>{cycle.name}</td><td>{cycle.startDate} to {cycle.dueDate}</td><td>{record ? formatNumber(record.previousReading) : '—'}</td><td>{record ? formatNumber(record.reading) : '—'}</td><td>{record ? formatNumber(Math.max(0, record.reading - record.previousReading)) : '—'}</td><td>{record?.readAt || 'Not read'}</td></tr> })}</tbody></table></div> : null}
+      </section>
+      <div className="report-footnote"><Icon name="gauge" /><span>Usage is calculated as current reading minus previous reading and shown in cubic feet (CF). The Excel workbook includes formatted titles, filters, and separate readings for each selected checkpoint.</span></div>
+      {error && <div className="report-error" role="alert">{error}</div>}
+    </div>
   </>
 }
 
