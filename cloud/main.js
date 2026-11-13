@@ -266,16 +266,27 @@ Parse.Cloud.define('adminSetBillingOverride', async request => {
   const cycleId = String(request.params.cycleId || '')
   const amount = Number(request.params.amount)
   const reason = String(request.params.reason || '').trim()
-  if (!customerId || !cycleId || !Number.isFinite(amount) || !reason) {
-    throw new Parse.Error(Parse.Error.INVALID_QUERY, 'A customer, billing cycle, amount, and reason are required.')
+  const overrideId = String(request.params.overrideId || '')
+  if (!customerId || !cycleId || !Number.isFinite(amount)) {
+    throw new Parse.Error(Parse.Error.INVALID_QUERY, 'A customer, billing cycle, and valid amount are required.')
   }
   const customer = await new Parse.Query('Customer').get(customerId, { useMasterKey: true })
   const cycle = await new Parse.Query('ReadingCycle').get(cycleId, { useMasterKey: true })
-  const query = new Parse.Query('BillingOverride')
-  query.equalTo('customer', customer)
-  query.equalTo('cycle', cycle)
-  let override = await query.first({ useMasterKey: true })
-  if (!override) override = new Parse.Object('BillingOverride')
+  let override
+  if (overrideId) {
+    override = await new Parse.Query('BillingOverride').get(overrideId, { useMasterKey: true })
+    const existingCustomer = override.get('customer')
+    const existingCycle = override.get('cycle')
+    if ((existingCustomer && existingCustomer.id !== customer.id) || (existingCycle && existingCycle.id !== cycle.id)) {
+      throw new Parse.Error(Parse.Error.OPERATION_FORBIDDEN, 'The selected override does not belong to this customer and billing cycle.')
+    }
+  } else {
+    const query = new Parse.Query('BillingOverride')
+    query.equalTo('customer', customer)
+    query.equalTo('cycle', cycle)
+    override = await query.first({ useMasterKey: true })
+    if (!override) override = new Parse.Object('BillingOverride')
+  }
   override.set('customer', customer)
   override.set('cycle', cycle)
   override.set('amount', Math.round(amount * 100) / 100)
